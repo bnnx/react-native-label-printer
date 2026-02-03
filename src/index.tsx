@@ -11,3 +11,6 @@ export function connect(address: string) {
 export function sendRaw(data: string) {
   return LabelPrinter.sendRaw(data);
 }
+
+export * from './TSPLBuilder';
+export * from './CPCLBuilder';

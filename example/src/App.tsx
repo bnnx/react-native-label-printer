@@ -14,6 +14,7 @@ import {
   listBondedDevices,
   connect,
   sendRaw,
+  TSPLBuilder,
 } from 'react-native-label-printer';
 import {
   check,
@@ -24,6 +25,16 @@ import {
 } from 'react-native-permissions';
 
 type Device = { name: string; address: string };
+
+const PRODUCT = {
+  id: '006c2c24-b45d-4bf1-baae-2a94f40ebc38',
+  name: 'Store Name',
+  description: 'Product Description',
+  size: 'M',
+  color: 'Blue',
+  price: 'R$ 159,90',
+  code: '0126/1-001-001',
+};
 
 export default function App() {
   const [bondedDevices, setBondedDevices] = useState<Device[]>([]);
@@ -111,9 +122,26 @@ export default function App() {
       const hasPermission = await requestPermission();
       if (!hasPermission) return;
 
-      await sendRaw(
-        'SIZE 58 mm,30 mm\nGAP 2 mm,0\nCLS\nTEXT 50,50,"3",0,1,1,"TEST PRINT"\nQRCODE 20,20,L,5,A,0,"https://example.com"\nPRINT 1\n'
-      );
+      const command = new TSPLBuilder()
+        .size(58, 30)
+        .gap(2)
+        .clear()
+        .codePage('1252')
+        .text(10, 10, PRODUCT.name)
+        .text(10, 50, PRODUCT.description)
+        .text(10, 80, `Tam.: ${PRODUCT.size}`)
+        .text(10, 110, `Cor: ${PRODUCT.color}`)
+        .text(10, 150, PRODUCT.price, {
+          xMultiplication: 2,
+          yMultiplication: 2,
+        })
+        .qrCode(260, 30, PRODUCT.id, {
+          cellWidth: 4,
+        })
+        .print(1)
+        .build();
+
+      await sendRaw(command);
       Alert.alert('Success', 'Printed successfully');
     } catch {
       Alert.alert('Print Failed', 'Could not print');
