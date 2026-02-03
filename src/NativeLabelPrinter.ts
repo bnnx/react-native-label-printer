@@ -1,7 +1,8 @@
 import { TurboModuleRegistry, type TurboModule } from 'react-native';
 
 export interface Spec extends TurboModule {
-  multiply(a: number, b: number): number;
+  listBondedDevices(): Promise<{ name: string; address: string }[]>;
+  connect(address: string): Promise<void>;
 }
 
 export default TurboModuleRegistry.getEnforcing<Spec>('LabelPrinter');

@@ -1,5 +1,9 @@
 import LabelPrinter from './NativeLabelPrinter';
 
-export function multiply(a: number, b: number): number {
-  return LabelPrinter.multiply(a, b);
+export function listBondedDevices() {
+  return LabelPrinter.listBondedDevices();
+}
+
+export function connect(address: string) {
+  return LabelPrinter.connect(address);
 }
