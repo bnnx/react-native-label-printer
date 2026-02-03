@@ -10,7 +10,7 @@ import {
   FlatList,
   StatusBar,
 } from 'react-native';
-import { listBondedDevices, connect } from 'react-native-label-printer';
+import { listBondedDevices, connect, print } from 'react-native-label-printer';
 import {
   check,
   request,
@@ -26,6 +26,7 @@ export default function App() {
   const [isConnecting, setIsConnecting] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [permissionDenied, setPermissionDenied] = useState(false);
+  const [isPrinting, setIsPrinting] = useState(false);
 
   const handleBlockedPermission = () => {
     Alert.alert(
@@ -100,6 +101,23 @@ export default function App() {
     }
   };
 
+  const handlePrint = async () => {
+    setIsPrinting(true);
+    try {
+      const hasPermission = await requestPermission();
+      if (!hasPermission) return;
+
+      await print(
+        'SIZE 58 mm,30 mm\nGAP 2 mm,0\nCLS\nTEXT 50,50,"3",0,1,1,"TEST PRINT"\nQRCODE 20,20,L,5,A,0,"https://example.com"\nPRINT 1\n'
+      );
+      Alert.alert('Success', 'Printed successfully');
+    } catch {
+      Alert.alert('Print Failed', 'Could not print');
+    } finally {
+      setIsPrinting(false);
+    }
+  };
+
   useEffect(() => {
     loadBondedDevices();
   }, [loadBondedDevices]);
@@ -126,8 +144,15 @@ export default function App() {
       <View style={styles.header}>
         <Text style={styles.title}>Paired Devices</Text>
         <TouchableOpacity
+          onPress={handlePrint}
+          disabled={isLoading || isConnecting || isPrinting}
+          style={styles.refreshButton}
+        >
+          <Text style={styles.refreshText}>Print</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
           onPress={loadBondedDevices}
-          disabled={isLoading || isConnecting}
+          disabled={isLoading || isConnecting || isPrinting}
           style={styles.refreshButton}
         >
           <Text style={styles.refreshText}>Refresh</Text>

@@ -11,6 +11,7 @@ import androidx.core.app.ActivityCompat
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
+import android.util.Base64
 import java.io.IOException
 import java.util.UUID
 
@@ -83,6 +84,32 @@ class LabelPrinterModule(reactContext: ReactApplicationContext) :
       } catch (e: Exception) {
         promise.reject("ERROR", "Unexpected error: ${e.message}")
         closeSocket()
+      }
+    }.start()
+  }
+
+  override fun print(data: String, promise: Promise) {
+    if (mmSocket == null || !mmSocket!!.isConnected) {
+      promise.reject("NOT_CONNECTED", "Printer is not connected")
+      return
+    }
+
+    if (!hasPermission()) {
+      promise.reject("PERMISSION_DENIED", "Bluetooth connect permission denied")
+      return
+    }
+
+    Thread {
+      try {
+        val outputStream = mmSocket!!.outputStream
+        val bytes = data.toByteArray(Charsets.UTF_8)
+        outputStream.write(bytes)
+        outputStream.flush()
+        promise.resolve(true)
+      } catch (e: IOException) {
+        promise.reject("PRINT_FAILED", "Failed to send data to printer: " + e.message)
+      } catch (e: Exception) {
+        promise.reject("ERROR", "Unexpected error: " + e.message)
       }
     }.start()
   }

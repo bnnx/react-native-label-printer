@@ -7,3 +7,7 @@ export function listBondedDevices() {
 export function connect(address: string) {
   return LabelPrinter.connect(address);
 }
+
+export function print(data: string) {
+  return LabelPrinter.print(data);
+}
