@@ -10,7 +10,11 @@ import {
   FlatList,
   StatusBar,
 } from 'react-native';
-import { listBondedDevices, connect, print } from 'react-native-label-printer';
+import {
+  listBondedDevices,
+  connect,
+  sendRaw,
+} from 'react-native-label-printer';
 import {
   check,
   request,
@@ -107,7 +111,7 @@ export default function App() {
       const hasPermission = await requestPermission();
       if (!hasPermission) return;
 
-      await print(
+      await sendRaw(
         'SIZE 58 mm,30 mm\nGAP 2 mm,0\nCLS\nTEXT 50,50,"3",0,1,1,"TEST PRINT"\nQRCODE 20,20,L,5,A,0,"https://example.com"\nPRINT 1\n'
       );
       Alert.alert('Success', 'Printed successfully');

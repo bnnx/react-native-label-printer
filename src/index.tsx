@@ -8,6 +8,6 @@ export function connect(address: string) {
   return LabelPrinter.connect(address);
 }
 
-export function print(data: string) {
-  return LabelPrinter.print(data);
+export function sendRaw(data: string) {
+  return LabelPrinter.sendRaw(data);
 }

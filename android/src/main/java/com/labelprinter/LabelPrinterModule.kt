@@ -88,7 +88,7 @@ class LabelPrinterModule(reactContext: ReactApplicationContext) :
     }.start()
   }
 
-  override fun print(data: String, promise: Promise) {
+  override fun sendRaw(data: String, promise: Promise) {
     if (mmSocket == null || !mmSocket!!.isConnected) {
       promise.reject("NOT_CONNECTED", "Printer is not connected")
       return
