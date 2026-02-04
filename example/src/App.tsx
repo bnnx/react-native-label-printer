@@ -28,11 +28,11 @@ type Device = { name: string; address: string };
 
 const PRODUCT = {
   id: '006c2c24-b45d-4bf1-baae-2a94f40ebc38',
-  name: 'Store Name',
-  description: 'Product Description',
+  name: 'My Store',
+  description: 'Jeans Pants',
   size: 'M',
   color: 'Blue',
-  price: 'R$ 159,90',
+  price: '159.90',
   code: '0126/1-001-001',
 };
 
@@ -123,21 +123,24 @@ export default function App() {
       if (!hasPermission) return;
 
       const command = new TSPLBuilder()
-        .size(58, 30)
+        .size(51, 30)
         .gap(2)
         .clear()
-        .codePage('1252')
-        .text(10, 10, PRODUCT.name)
-        .text(10, 50, PRODUCT.description)
-        .text(10, 80, `Tam.: ${PRODUCT.size}`)
-        .text(10, 110, `Cor: ${PRODUCT.color}`)
-        .text(10, 150, PRODUCT.price, {
+        .text(10, 220, PRODUCT.name, { rotation: 270 })
+        .text(50, 220, PRODUCT.description, { rotation: 270 })
+        .text(80, 220, `Size: ${PRODUCT.size}`, { rotation: 270 })
+        .text(110, 220, `Color: ${PRODUCT.color}`, { rotation: 270 })
+        .text(180, 220, '$ ', { rotation: 270 })
+        .text(160, 190, PRODUCT.price, {
+          rotation: 270,
           xMultiplication: 2,
           yMultiplication: 2,
         })
-        .qrCode(260, 30, PRODUCT.id, {
+        .qrCode(220, 175, PRODUCT.id, {
+          rotation: 270,
           cellWidth: 4,
         })
+        .text(350, 205, PRODUCT.code, { rotation: 270 })
         .print(1)
         .build();
 
