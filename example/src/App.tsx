@@ -148,7 +148,7 @@ export default function App() {
     try {
       // Build TSPL command
       const verticalLabelCommand = new TSPLBuilder()
-        .size(51, 30) // Label size in mm
+        .size(50, 30) // Label size in mm
         .gap(2) // Gap size in mm
         .clear() // Clear buffer
         .text(10, 220, DEMO_LABEL.name, { rotation: 270 })
@@ -163,10 +163,8 @@ export default function App() {
         .print(1)
         .build();
 
-      await sendRaw(verticalLabelCommand);
-
       const horizontalLabelCommand = new TSPLBuilder()
-        .size(51, 30) // Label size in mm
+        .size(50, 30) // Label size in mm
         .gap(2) // Gap size in mm
         .clear() // Clear buffer
         .text(10, 10, DEMO_LABEL.name)
@@ -180,11 +178,12 @@ export default function App() {
         .print(1)
         .build();
 
-      await sendRaw(horizontalLabelCommand);
+      const payload = verticalLabelCommand + horizontalLabelCommand;
+      await sendRaw(payload);
     } catch {
       Alert.alert('Print Error', 'Lost connection to printer.');
       setConnectedDevice(null);
-      await disconnect(); // Cleanup
+      await disconnect();
     } finally {
       setIsPrinting(false);
     }
