@@ -46,7 +46,7 @@ export interface TSPLQrCodeOptions {
  * Follows the Builder pattern for fluent chaining.
  */
 export class TSPLBuilder {
-  private _commands: string[] = [];
+  private commands: string[] = [];
 
   /**
    * Set the label size
@@ -54,7 +54,7 @@ export class TSPLBuilder {
    * @param heightMm Height in mm
    */
   size(widthMm: number, heightMm: number): TSPLBuilder {
-    this._commands.push(`SIZE ${widthMm} mm,${heightMm} mm`);
+    this.commands.push(`SIZE ${widthMm} mm,${heightMm} mm`);
     return this;
   }
 
@@ -64,7 +64,7 @@ export class TSPLBuilder {
    * @param offsetMm Offset in mm (default 0)
    */
   gap(gapMm: number, offsetMm: number = 0): TSPLBuilder {
-    this._commands.push(`GAP ${gapMm} mm,${offsetMm} mm`);
+    this.commands.push(`GAP ${gapMm} mm,${offsetMm} mm`);
     return this;
   }
 
@@ -72,7 +72,7 @@ export class TSPLBuilder {
    * Clear the image buffer
    */
   cls(): TSPLBuilder {
-    this._commands.push('CLS');
+    this.commands.push('CLS');
     return this;
   }
 
@@ -84,7 +84,7 @@ export class TSPLBuilder {
    * @param value Code page value (e.g. "1252", "850", "437")
    */
   codePage(value: string): TSPLBuilder {
-    this._commands.push(`CODEPAGE ${value}`);
+    this.commands.push(`CODEPAGE ${value}`);
     return this;
   }
 
@@ -100,7 +100,7 @@ export class TSPLBuilder {
    * @param direction 0 or 1
    */
   direction(direction: 0 | 1): TSPLBuilder {
-    this._commands.push(`DIRECTION ${direction}`);
+    this.commands.push(`DIRECTION ${direction}`);
     return this;
   }
 
@@ -110,7 +110,7 @@ export class TSPLBuilder {
    * @param y Vertical coordinate
    */
   reference(x: number, y: number): TSPLBuilder {
-    this._commands.push(`REFERENCE ${x},${y}`);
+    this.commands.push(`REFERENCE ${x},${y}`);
     return this;
   }
 
@@ -119,7 +119,7 @@ export class TSPLBuilder {
    * @param value Density value (0-15)
    */
   density(value: number): TSPLBuilder {
-    this._commands.push(`DENSITY ${value}`);
+    this.commands.push(`DENSITY ${value}`);
     return this;
   }
 
@@ -128,7 +128,7 @@ export class TSPLBuilder {
    * @param mm Distance in mm
    */
   feed(mm: number): TSPLBuilder {
-    this._commands.push(`FEED ${mm}`);
+    this.commands.push(`FEED ${mm}`);
     return this;
   }
 
@@ -137,7 +137,7 @@ export class TSPLBuilder {
    * @param value Speed value (e.g. 1.5, 2.0, 3.0, 4.0, etc.)
    */
   speed(value: number): TSPLBuilder {
-    this._commands.push(`SPEED ${value}`);
+    this.commands.push(`SPEED ${value}`);
     return this;
   }
 
@@ -156,7 +156,7 @@ export class TSPLBuilder {
     yEnd: number,
     thickness: number = 1
   ): TSPLBuilder {
-    this._commands.push(`BOX ${x},${y},${xEnd},${yEnd},${thickness}`);
+    this.commands.push(`BOX ${x},${y},${xEnd},${yEnd},${thickness}`);
     return this;
   }
 
@@ -180,7 +180,7 @@ export class TSPLBuilder {
     // Escape quotes in content
     const safeContent = content.replace(/"/g, '\\"');
 
-    this._commands.push(
+    this.commands.push(
       `TEXT ${x},${y},"${font}",${rot},${xMul},${yMul},"${safeContent}"`
     );
     return this;
@@ -210,7 +210,7 @@ export class TSPLBuilder {
     const wide = options?.wide || 1;
 
     const safeContent = content.replace(/"/g, '\\"');
-    this._commands.push(
+    this.commands.push(
       `BARCODE ${x},${y},"${type}",${height},${readable},${rot},${narrow},${wide},"${safeContent}"`
     );
     return this;
@@ -235,7 +235,7 @@ export class TSPLBuilder {
     const rot = options?.rotation || 0;
     const safeContent = content.replace(/"/g, '\\"');
 
-    this._commands.push(
+    this.commands.push(
       `QRCODE ${x},${y},${ecc},${cellWidth},${mode},${rot},"${safeContent}"`
     );
     return this;
@@ -246,7 +246,7 @@ export class TSPLBuilder {
    * @param copies Number of copies
    */
   print(copies: number = 1): TSPLBuilder {
-    this._commands.push(`PRINT ${copies}`);
+    this.commands.push(`PRINT ${copies}`);
     return this;
   }
 
@@ -254,6 +254,6 @@ export class TSPLBuilder {
    * Build the final raw string commands
    */
   build(): string {
-    return this._commands.join('\n') + '\n';
+    return this.commands.join('\n') + '\n';
   }
 }
