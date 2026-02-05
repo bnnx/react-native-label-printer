@@ -24,7 +24,7 @@ import {
   disconnect,
   sendRaw,
   TSPLBuilder,
-} from 'react-native-label-printer';
+} from '@bnnx/react-native-label-printer';
 
 /*
  * ----------------------------------------------------------------------

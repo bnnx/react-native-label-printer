@@ -1,4 +1,4 @@
-# react-native-label-printer
+# @bnnx/react-native-label-printer
 
 A React Native library for printing labels and receipts on **thermal printers** via **Classic Bluetooth (Android Only)** using **TSPL** or **CPCL** command sets.
 
@@ -25,9 +25,9 @@ This library provides a simple, low-level bridge to communicate with Bluetooth t
 ## 📦 Installation
 
 ```sh
-npm install react-native-label-printer
+yarn add @bnnx/react-native-label-printer
 # or
-yarn add react-native-label-printer
+npm install @bnnx/react-native-label-printer
 ```
 
 ### Android Setup
@@ -60,7 +60,7 @@ import {
   listBondedDevices,
   connect,
   disconnect,
-} from 'react-native-label-printer';
+} from '@bnnx/react-native-label-printer';
 
 // 1. List paired devices
 const devices = await listBondedDevices();
@@ -84,7 +84,7 @@ await disconnect();
 Use the included `TSPLBuilder` to construct label commands easily.
 
 ```typescript
-import { TSPLBuilder, sendRaw } from 'react-native-label-printer';
+import { TSPLBuilder, sendRaw } from '@bnnx/react-native-label-printer';
 
 const command = new TSPLBuilder()
   .size(50, 30) // Label size: 50mm x 30mm
@@ -110,7 +110,7 @@ try {
 If you already have a command string (e.g., CPCL or ZPL), you can send it directly:
 
 ```typescript
-import { sendRaw } from 'react-native-label-printer';
+import { sendRaw } from '@bnnx/react-native-label-printer';
 
 const cpclCommand = `
 ! 0 200 200 210 1

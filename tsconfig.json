@@ -2,7 +2,7 @@
   "compilerOptions": {
     "rootDir": ".",
     "paths": {
-      "react-native-label-printer": ["./src/index"]
+      "@bnnx/react-native-label-printer": ["./src/index"]
     },
     "allowUnreachableCode": false,
     "allowUnusedLabels": false,

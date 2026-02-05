@@ -1,5 +1,5 @@
 {
-  "name": "react-native-label-printer",
+  "name": "@bnnx/react-native-label-printer",
   "version": "0.1.0",
   "description": "React Native library for printing labels via Bluetooth on Android and iOS, with support for TSPL and CPCL thermal printers.",
   "main": "./lib/module/index.js",
