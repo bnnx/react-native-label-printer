@@ -25,6 +25,11 @@ class LabelPrinterModule(reactContext: ReactApplicationContext) :
     bluetoothAdapter = bluetoothManager?.adapter
   }
 
+  companion object {
+    const val NAME = NativeLabelPrinterSpec.NAME
+    private val SPP_UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
+  }
+
   override fun listBondedDevices(promise: Promise) {
     if (bluetoothAdapter == null) {
       promise.reject("BLUETOOTH_UNAVAILABLE", "Bluetooth is not supported on this device")
@@ -69,20 +74,19 @@ class LabelPrinterModule(reactContext: ReactApplicationContext) :
     Thread {
       try {
         val device = bluetoothAdapter!!.getRemoteDevice(address)
-        val uuid = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
-
+        
         closeSocket()
 
-        val socket = device.createRfcommSocketToServiceRecord(uuid)
+        val socket = device.createRfcommSocketToServiceRecord(SPP_UUID)
         socket.connect()
         mmSocket = socket
         promise.resolve(true)
       } catch (e: IOException) {
+        closeSocket()
         promise.reject("CONNECTION_FAILED", "Could not connect to device: ${e.message}")
-        closeSocket()
       } catch (e: Exception) {
-        promise.reject("ERROR", "Unexpected error: ${e.message}")
         closeSocket()
+        promise.reject("ERROR", "Unexpected error: ${e.message}")
       }
     }.start()
   }
@@ -135,9 +139,5 @@ class LabelPrinterModule(reactContext: ReactApplicationContext) :
       mmSocket?.close()
     } catch (e: IOException) {}
     mmSocket = null
-  }
-
-  companion object {
-    const val NAME = NativeLabelPrinterSpec.NAME
   }
 }

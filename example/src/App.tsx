@@ -10,12 +10,7 @@ import {
   FlatList,
   StatusBar,
 } from 'react-native';
-import {
-  listBondedDevices,
-  connect,
-  sendRaw,
-  TSPLBuilder,
-} from 'react-native-label-printer';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   check,
   request,
@@ -23,351 +18,499 @@ import {
   RESULTS,
   openSettings,
 } from 'react-native-permissions';
+import {
+  listBondedDevices,
+  connect,
+  disconnect,
+  sendRaw,
+  TSPLBuilder,
+} from 'react-native-label-printer';
 
-type Device = { name: string; address: string };
-
-const PRODUCT = {
+/*
+ * ----------------------------------------------------------------------
+ * Example Data for Printing
+ * ----------------------------------------------------------------------
+ */
+const DEMO_LABEL = {
   id: '006c2c24-b45d-4bf1-baae-2a94f40ebc38',
   name: 'My Store',
-  description: 'Jeans Pants',
-  size: 'M',
-  color: 'Blue',
+  description: 'Canvas Sneakers',
+  size: '42',
+  color: 'Black',
   price: '159.90',
   code: '0126/1-001-001',
 };
 
+type Device = { name: string; address: string };
+
 export default function App() {
-  const [bondedDevices, setBondedDevices] = useState<Device[]>([]);
+  const [devices, setDevices] = useState<Device[]>([]);
+  const [connectedDevice, setConnectedDevice] = useState<Device | null>(null);
+
+  const [isScanning, setIsScanning] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [permissionDenied, setPermissionDenied] = useState(false);
   const [isPrinting, setIsPrinting] = useState(false);
+  const [permissionDenied, setPermissionDenied] = useState(false);
 
-  const handleBlockedPermission = () => {
-    Alert.alert(
-      'Permission Required',
-      'Bluetooth permission is required to list paired devices. Please enable it in settings.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Open Settings', onPress: openSettings },
-      ]
-    );
-  };
-
-  const requestPermission = useCallback(async () => {
-    if (Platform.OS !== 'android') {
-      return true;
-    }
+  /*
+   * ----------------------------------------------------------------------
+   * 1. Permissions Handling (Android 12+ requires BLUETOOTH_CONNECT)
+   * ----------------------------------------------------------------------
+   */
+  const requestBluetoothPermission = useCallback(async () => {
+    if (Platform.OS !== 'android') return true;
 
     const permission = PERMISSIONS.ANDROID.BLUETOOTH_CONNECT;
     const result = await check(permission);
 
-    // TO-DO: validate when Android version < 12
-    if (result === RESULTS.GRANTED || result === RESULTS.UNAVAILABLE) {
+    if (result === RESULTS.GRANTED || result === RESULTS.UNAVAILABLE)
       return true;
-    }
 
     if (result === RESULTS.DENIED || result === RESULTS.LIMITED) {
       const newResult = await request(permission);
-      if (newResult === RESULTS.BLOCKED) {
-        handleBlockedPermission();
-      }
       return newResult === RESULTS.GRANTED;
     }
 
     if (result === RESULTS.BLOCKED) {
-      handleBlockedPermission();
+      Alert.alert(
+        'Permission Required',
+        'Bluetooth Connect permission is required. Please enable it in Settings.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Open Settings', onPress: openSettings },
+        ]
+      );
     }
-
     return false;
   }, []);
 
-  const loadBondedDevices = useCallback(async () => {
-    setIsLoading(true);
+  /*
+   * ----------------------------------------------------------------------
+   * 2. Device Management (List & Connect)
+   * ----------------------------------------------------------------------
+   */
+  const loadDevices = useCallback(async () => {
+    setIsScanning(true);
     setPermissionDenied(false);
     try {
-      const hasPermission = await requestPermission();
+      const hasPermission = await requestBluetoothPermission();
       if (!hasPermission) {
         setPermissionDenied(true);
         return;
       }
 
-      const result = await listBondedDevices();
-      setBondedDevices(result);
+      // Shows paired devices from Android Settings. We do not scan for new devices here.
+      const list = await listBondedDevices();
+      setDevices(list);
     } catch {
-      Alert.alert('Error', 'Failed to list devices');
+      Alert.alert('Error', 'Failed to list paired devices');
     } finally {
-      setIsLoading(false);
+      setIsScanning(false);
     }
-  }, [requestPermission]);
+  }, [requestBluetoothPermission]);
 
-  const handleConnect = async (device: Device) => {
+  const handleToggleConnection = async (device: Device) => {
+    // If clicking on the already connected device -> Disconnect
+    if (connectedDevice?.address === device.address) {
+      setIsConnecting(true);
+      try {
+        await disconnect();
+        setConnectedDevice(null);
+      } catch {
+        Alert.alert('Error', 'Failed to disconnect');
+      } finally {
+        setIsConnecting(false);
+      }
+      return;
+    }
+
+    // Connect to a new device
     setIsConnecting(true);
     try {
-      const hasPermission = await requestPermission();
+      const hasPermission = await requestBluetoothPermission();
       if (!hasPermission) return;
 
       await connect(device.address);
-      Alert.alert('Success', `Connected to ${device.name}`);
+      setConnectedDevice(device);
     } catch {
-      Alert.alert('Connection Failed', 'Could not connect to device');
+      Alert.alert('Connection Failed', `Could not connect to ${device.name}`);
     } finally {
       setIsConnecting(false);
     }
   };
 
+  /*
+   * ----------------------------------------------------------------------
+   * 3. Printing Logic (TSPL Example)
+   * ----------------------------------------------------------------------
+   */
   const handlePrint = async () => {
+    if (!connectedDevice) return;
+
     setIsPrinting(true);
     try {
-      const hasPermission = await requestPermission();
-      if (!hasPermission) return;
-
-      const command = new TSPLBuilder()
-        .size(51, 30)
-        .gap(2)
-        .clear()
-        .text(10, 220, PRODUCT.name, { rotation: 270 })
-        .text(50, 220, PRODUCT.description, { rotation: 270 })
-        .text(80, 220, `Size: ${PRODUCT.size}`, { rotation: 270 })
-        .text(110, 220, `Color: ${PRODUCT.color}`, { rotation: 270 })
-        .text(180, 220, '$ ', { rotation: 270 })
-        .text(160, 190, PRODUCT.price, {
-          rotation: 270,
-          xMultiplication: 2,
-          yMultiplication: 2,
-        })
-        .qrCode(220, 175, PRODUCT.id, {
+      // Build TSPL command
+      const verticalLabelCommand = new TSPLBuilder()
+        .size(51, 30) // Label size in mm
+        .gap(2) // Gap size in mm
+        .clear() // Clear buffer
+        .text(10, 220, DEMO_LABEL.name, { rotation: 270 })
+        .text(50, 220, DEMO_LABEL.description, { rotation: 270 })
+        .text(80, 220, `Size: ${DEMO_LABEL.size}`, { rotation: 270 })
+        .text(110, 220, `Price: $${DEMO_LABEL.price}`, { rotation: 270 })
+        .qrCode(160, 175, DEMO_LABEL.id, {
           rotation: 270,
           cellWidth: 4,
         })
-        .text(350, 205, PRODUCT.code, { rotation: 270 })
+        .barcode(310, 210, DEMO_LABEL.code, '128', 40, { rotation: 270 })
         .print(1)
         .build();
 
-      await sendRaw(command);
-      Alert.alert('Success', 'Printed successfully');
+      await sendRaw(verticalLabelCommand);
+
+      const horizontalLabelCommand = new TSPLBuilder()
+        .size(51, 30) // Label size in mm
+        .gap(2) // Gap size in mm
+        .clear() // Clear buffer
+        .text(10, 10, DEMO_LABEL.name)
+        .text(10, 50, DEMO_LABEL.description)
+        .text(10, 80, `Size: ${DEMO_LABEL.size}`)
+        .text(10, 110, `Price: $${DEMO_LABEL.price}`)
+        .qrCode(250, 10, DEMO_LABEL.id, {
+          cellWidth: 4,
+        })
+        .barcode(220, 140, DEMO_LABEL.code, '128', 40)
+        .print(1)
+        .build();
+
+      await sendRaw(horizontalLabelCommand);
     } catch {
-      Alert.alert('Print Failed', 'Could not print');
+      Alert.alert('Print Error', 'Lost connection to printer.');
+      setConnectedDevice(null);
+      await disconnect(); // Cleanup
     } finally {
       setIsPrinting(false);
     }
   };
 
+  // Initial load
   useEffect(() => {
-    loadBondedDevices();
-  }, [loadBondedDevices]);
+    loadDevices();
+  }, [loadDevices]);
 
-  const renderDevice = ({ item }: { item: Device }) => (
-    <TouchableOpacity
-      style={styles.deviceItem}
-      onPress={() => handleConnect(item)}
-      disabled={isConnecting}
-    >
-      <View>
-        <Text style={styles.deviceName}>{item.name}</Text>
-        <Text style={styles.deviceAddress}>{item.address}</Text>
-      </View>
-      <View style={styles.chevron}>
-        <Text style={styles.chevronText}>Connect</Text>
-      </View>
-    </TouchableOpacity>
-  );
+  /*
+   * ----------------------------------------------------------------------
+   * 4. UI Rendering
+   * ----------------------------------------------------------------------
+   */
+  const renderDevice = ({ item }: { item: Device }) => {
+    const isConnected = connectedDevice?.address === item.address;
+    const isOtherConnected = !!connectedDevice && !isConnected;
+
+    return (
+      <TouchableOpacity
+        style={[
+          styles.deviceItem,
+          isConnected && styles.deviceItemActive,
+          isOtherConnected && styles.deviceItemDisabled,
+        ]}
+        onPress={() => handleToggleConnection(item)}
+        disabled={isConnecting || isOtherConnected}
+        activeOpacity={0.7}
+      >
+        <View style={styles.deviceInfo}>
+          <Text style={styles.deviceName}>{item.name}</Text>
+          <Text style={styles.deviceAddress}>{item.address}</Text>
+        </View>
+
+        {isConnected && (
+          <View style={styles.statusBadge}>
+            <View style={styles.statusDot} />
+            <Text style={styles.statusText}>Connected</Text>
+          </View>
+        )}
+
+        {!isConnected && !isOtherConnected && (
+          <Text style={styles.connectLink}>Connect</Text>
+        )}
+      </TouchableOpacity>
+    );
+  };
 
   return (
-    <View style={styles.container}>
-      <StatusBar barStyle="dark-content" />
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
+
+      {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.title}>Paired Devices</Text>
-        <TouchableOpacity
-          onPress={handlePrint}
-          disabled={isLoading || isConnecting || isPrinting}
-          style={styles.refreshButton}
-        >
-          <Text style={styles.refreshText}>Print</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          onPress={loadBondedDevices}
-          disabled={isLoading || isConnecting || isPrinting}
-          style={styles.refreshButton}
-        >
-          <Text style={styles.refreshText}>Refresh</Text>
-        </TouchableOpacity>
+        <View>
+          <Text style={styles.title}>Label Printer</Text>
+          <Text style={styles.subtitle}>Bluetooth Thermal Print Demo</Text>
+        </View>
+
+        {connectedDevice && (
+          <TouchableOpacity
+            onPress={handlePrint}
+            disabled={isPrinting}
+            style={[
+              styles.actionButton,
+              styles.printButton,
+              isPrinting && styles.buttonDisabled,
+            ]}
+          >
+            {isPrinting ? (
+              <ActivityIndicator color="#FFF" size="small" />
+            ) : (
+              <Text style={styles.printButtonText}>Print</Text>
+            )}
+          </TouchableOpacity>
+        )}
       </View>
 
+      {/* Main Content */}
       <View style={styles.content}>
-        {isLoading ? (
-          <ActivityIndicator size="large" color="#007AFF" />
-        ) : bondedDevices.length === 0 ? (
-          <View style={styles.emptyContainer}>
+        {isScanning ? (
+          <View style={styles.centerContainer}>
+            <ActivityIndicator size="large" color="#007AFF" />
+            <Text style={styles.loadingText}>Listing paired devices...</Text>
+          </View>
+        ) : devices.length === 0 ? (
+          <View style={styles.centerContainer}>
             {permissionDenied ? (
               <>
-                <Text style={styles.emptyText}>Permission Required</Text>
-                <Text style={styles.emptySubText}>
-                  Bluetooth permission is denied. Please enable it in settings
-                  to list devices.
+                <Text style={styles.emptyTitle}>Permission Denied</Text>
+                <Text style={styles.emptyText}>
+                  Enable Bluetooth Connect to find printers.
                 </Text>
                 <TouchableOpacity
                   onPress={() => openSettings()}
-                  style={styles.settingsButton}
+                  style={styles.secondaryButton}
                 >
-                  <Text style={styles.settingsButtonText}>Open Settings</Text>
+                  <Text style={styles.secondaryButtonText}>Open Settings</Text>
                 </TouchableOpacity>
               </>
             ) : (
               <>
-                <Text style={styles.emptyText}>No paired devices found.</Text>
-                <Text style={styles.emptySubText}>
-                  Pair a Bluetooth printer in Android settings first.
+                <Text style={styles.emptyTitle}>No Devices Found</Text>
+                <Text style={styles.emptyText}>
+                  Pair a generic Bluetooth printer in Android settings first.
                 </Text>
+                <TouchableOpacity
+                  onPress={loadDevices}
+                  style={styles.secondaryButton}
+                >
+                  <Text style={styles.secondaryButtonText}>Reload</Text>
+                </TouchableOpacity>
               </>
             )}
           </View>
         ) : (
           <FlatList
-            data={bondedDevices}
+            data={devices}
             renderItem={renderDevice}
             keyExtractor={(item) => item.address}
-            contentContainerStyle={styles.listContent}
+            contentContainerStyle={styles.list}
+            refreshing={isScanning}
+            onRefresh={loadDevices}
           />
         )}
       </View>
 
+      {/* Global Overlay Loading (Connection) */}
       {isConnecting && (
-        <View style={styles.loadingOverlay}>
-          <View style={styles.loadingBox}>
+        <View style={styles.overlay}>
+          <View style={styles.overlayBox}>
             <ActivityIndicator size="large" color="#007AFF" />
-            <Text style={styles.loadingText}>Connecting...</Text>
+            <Text style={styles.overlayText}>Connecting...</Text>
           </View>
         </View>
       )}
-    </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F2F2F7',
+    backgroundColor: '#F5F5F7',
   },
   header: {
-    padding: 20,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    padding: 24,
     backgroundColor: '#FFFFFF',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     borderBottomWidth: 1,
     borderBottomColor: '#E5E5EA',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 5,
+    shadowOffset: { width: 0, height: 2 },
   },
   title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#000000',
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#000',
   },
-  refreshButton: {
-    padding: 8,
-  },
-  refreshText: {
-    color: '#007AFF',
-    fontSize: 16,
-    fontWeight: '600',
+  subtitle: {
+    fontSize: 13,
+    color: '#8E8E93',
+    fontWeight: '500',
+    marginTop: 2,
   },
   content: {
     flex: 1,
   },
-  listContent: {
-    padding: 16,
+  list: {
+    padding: 20,
   },
+  // Device Card
   deviceItem: {
     backgroundColor: '#FFFFFF',
-    padding: 16,
-    borderRadius: 12,
+    borderRadius: 16,
+    padding: 20,
     marginBottom: 12,
     flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 1,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
-  },
-  deviceName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#000000',
-    marginBottom: 4,
-  },
-  deviceAddress: {
-    fontSize: 12,
-    color: '#8E8E93',
-  },
-  chevron: {
-    backgroundColor: '#F2F2F7',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-  },
-  chevronText: {
-    color: '#007AFF',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  emptyContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 40,
-  },
-  emptyText: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#8E8E93',
-    marginBottom: 8,
-  },
-  emptySubText: {
-    fontSize: 14,
-    color: '#AEAEB2',
-    textAlign: 'center',
-    marginBottom: 20,
-  },
-  settingsButton: {
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    backgroundColor: '#007AFF',
-    borderRadius: 8,
-  },
-  settingsButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  loadingOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0, 0, 0, 0.4)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingBox: {
-    backgroundColor: '#FFFFFF',
-    padding: 24,
-    borderRadius: 16,
-    alignItems: 'center',
+    // Shadow
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
       height: 2,
     },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    elevation: 5,
+    shadowOpacity: 0.05,
+    shadowRadius: 3.84,
+    elevation: 2,
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
+  deviceItemActive: {
+    borderColor: '#34C759',
+    backgroundColor: '#F2FFF5',
+  },
+  deviceItemDisabled: {
+    opacity: 0.5,
+  },
+  deviceInfo: {
+    flex: 1,
+  },
+  deviceName: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#000',
+    marginBottom: 4,
+  },
+  deviceAddress: {
+    fontSize: 12,
+    color: '#8E8E93',
+    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+  },
+  connectLink: {
+    color: '#007AFF',
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  // Badges
+  statusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#34C759',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#FFF',
+    marginRight: 6,
+  },
+  statusText: {
+    color: '#FFF',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  // Buttons
+  printButton: {
+    backgroundColor: '#007AFF',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 24,
+    minWidth: 80,
+    alignItems: 'center',
+  },
+  printButtonText: {
+    color: '#FFF',
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  secondaryButton: {
+    marginTop: 16,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    backgroundColor: '#E5F1FF',
+    borderRadius: 12,
+  },
+  secondaryButtonText: {
+    color: '#007AFF',
+    fontWeight: '600',
+  },
+  actionButton: {},
+  buttonDisabled: {
+    opacity: 0.7,
+  },
+  // Empty States & Loading
+  centerContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 32,
   },
   loadingText: {
-    marginTop: 12,
+    marginTop: 16,
     fontSize: 16,
-    color: '#000000',
-    fontWeight: '500',
+    color: '#8E8E93',
+  },
+  emptyTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#000',
+    marginBottom: 8,
+  },
+  emptyText: {
+    fontSize: 14,
+    color: '#8E8E93',
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  // Overlays
+  overlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  overlayBox: {
+    backgroundColor: '#FFF',
+    padding: 32,
+    borderRadius: 24,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 10,
+    elevation: 10,
+  },
+  overlayText: {
+    marginTop: 16,
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#000',
   },
 });
