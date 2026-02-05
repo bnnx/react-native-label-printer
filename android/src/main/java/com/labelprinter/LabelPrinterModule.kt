@@ -11,7 +11,6 @@ import androidx.core.app.ActivityCompat
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
-import android.util.Base64
 import java.io.IOException
 import java.util.UUID
 
@@ -88,6 +87,15 @@ class LabelPrinterModule(reactContext: ReactApplicationContext) :
     }.start()
   }
 
+  override fun disconnect(promise: Promise) {
+    try {
+      closeSocket()
+      promise.resolve(true)
+    } catch (e: Exception) {
+      promise.reject("ERROR", "Failed to disconnect: ${e.message}")
+    }
+  }
+
   override fun sendRaw(data: String, promise: Promise) {
     if (mmSocket == null || !mmSocket!!.isConnected) {
       promise.reject("NOT_CONNECTED", "Printer is not connected")
@@ -107,6 +115,7 @@ class LabelPrinterModule(reactContext: ReactApplicationContext) :
         outputStream.flush()
         promise.resolve(true)
       } catch (e: IOException) {
+        closeSocket()
         promise.reject("PRINT_FAILED", "Failed to send data to printer: " + e.message)
       } catch (e: Exception) {
         promise.reject("ERROR", "Unexpected error: " + e.message)
