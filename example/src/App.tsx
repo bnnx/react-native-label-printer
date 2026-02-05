@@ -99,7 +99,6 @@ export default function App() {
         return;
       }
 
-      // Shows paired devices from Android Settings. We do not scan for new devices here.
       const list = await listBondedDevices();
       setDevices(list);
     } catch {
@@ -110,7 +109,6 @@ export default function App() {
   }, [requestBluetoothPermission]);
 
   const handleToggleConnection = async (device: Device) => {
-    // If clicking on the already connected device -> Disconnect
     if (connectedDevice?.address === device.address) {
       setIsConnecting(true);
       try {
@@ -124,7 +122,6 @@ export default function App() {
       return;
     }
 
-    // Connect to a new device
     setIsConnecting(true);
     try {
       const hasPermission = await requestBluetoothPermission();
@@ -193,7 +190,6 @@ export default function App() {
     }
   };
 
-  // Initial load
   useEffect(() => {
     loadDevices();
   }, [loadDevices]);
@@ -241,7 +237,6 @@ export default function App() {
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
 
-      {/* Header */}
       <View style={styles.header}>
         <View>
           <Text style={styles.title}>Label Printer</Text>
@@ -267,7 +262,6 @@ export default function App() {
         )}
       </View>
 
-      {/* Main Content */}
       <View style={styles.content}>
         {isScanning ? (
           <View style={styles.centerContainer}>
@@ -316,7 +310,6 @@ export default function App() {
         )}
       </View>
 
-      {/* Global Overlay Loading (Connection) */}
       {isConnecting && (
         <View style={styles.overlay}>
           <View style={styles.overlayBox}>
@@ -365,7 +358,6 @@ const styles = StyleSheet.create({
   list: {
     padding: 20,
   },
-  // Device Card
   deviceItem: {
     backgroundColor: '#FFFFFF',
     borderRadius: 16,
@@ -374,7 +366,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    // Shadow
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
@@ -412,7 +403,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     fontSize: 14,
   },
-  // Badges
   statusBadge: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -433,7 +423,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
   },
-  // Buttons
   printButton: {
     backgroundColor: '#007AFF',
     paddingHorizontal: 20,
@@ -462,7 +451,6 @@ const styles = StyleSheet.create({
   buttonDisabled: {
     opacity: 0.7,
   },
-  // Empty States & Loading
   centerContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -486,7 +474,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 20,
   },
-  // Overlays
   overlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(0,0,0,0.4)',
