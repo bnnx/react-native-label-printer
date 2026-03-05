@@ -2,6 +2,8 @@ package com.labelprinter
 
 import android.Manifest
 import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothClass
+import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothSocket
 import android.content.Context
@@ -28,6 +30,18 @@ class LabelPrinterModule(reactContext: ReactApplicationContext) :
   companion object {
     const val NAME = NativeLabelPrinterSpec.NAME
     private val SPP_UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
+    private const val MINOR_DEVICE_CLASS_PRINTER = 0x0680
+  }
+
+  private fun isPrinter(device: BluetoothDevice): Boolean {
+    val bluetoothClass = device.bluetoothClass
+    val isImagingPrinter = bluetoothClass != null &&
+      bluetoothClass.majorDeviceClass == BluetoothClass.Device.Major.IMAGING &&
+      (bluetoothClass.deviceClass and MINOR_DEVICE_CLASS_PRINTER) != 0
+
+    val hasSppService = device.uuids?.any { it.uuid == SPP_UUID } ?: false
+
+    return isImagingPrinter || hasSppService
   }
 
   override fun listBondedDevices(promise: Promise) {
@@ -45,7 +59,7 @@ class LabelPrinterModule(reactContext: ReactApplicationContext) :
       val bondedDevices = bluetoothAdapter!!.bondedDevices
       val result = Arguments.createArray()
 
-      bondedDevices.forEach { device ->
+      bondedDevices.filter { device -> isPrinter(device) }.forEach { device ->
         val map = Arguments.createMap()
         map.putString("name", device.name ?: "Unknown")
         map.putString("address", device.address)
