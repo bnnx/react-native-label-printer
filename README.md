@@ -1,190 +1,210 @@
 # @bnnx/react-native-label-printer
 
-A React Native library for printing labels and receipts on **thermal printers** via **Classic Bluetooth (Android Only)** using **TSPL** or **CPCL** command sets.
+A React Native library for discovering, connecting to, and printing labels on Bluetooth Low Energy (BLE) thermal printers. Built on the New Architecture (TurboModules) with native support for TSPL commands.
 
-> ⚠️ **Note:** This library currently supports **Android only**. iOS support is planned for future releases.
+## Key Features
 
-## 🎯 Purpose
+- **TurboModule Architecture** — High-performance JSI bridge, no legacy Bridge overhead.
+- **Cross-Platform BLE** — Full Bluetooth LE implementation for both iOS (CoreBluetooth) and Android (BluetoothGatt).
+- **MTU-Aware Chunking** — Android transmissions are natively paced and chunked to prevent buffer overflows.
+- **Automatic Disconnection Detection** — Native event emitters notify when the printer goes out of range or is powered off.
+- **Modern Permissions** — Ready for Android 12+ (`neverForLocation`), no GPS permission needed to print.
+- **Built-in TSPL Builder** — Chainable API for text, barcodes, QR codes, and more.
+- **React Hook** — `useLabelPrinter` hook manages scanning, connection state, and device cleanup automatically.
 
-This library provides a simple, low-level bridge to communicate with Bluetooth thermal printers. It focuses on maintaining a focused, reliable connection and sending raw command strings to the device. It is **not** a high-level layout engine, but rather a driver to send your custom commands.
+## Tech Stack
 
-## ✅ What this library DOES
-
-- **Connect/Disconnect**: Manages the connection lifecycle with paired Bluetooth devices.
-- **Send Raw Data**: Sends raw strings (TSPL/CPCL commands) directly to the printer socket.
-- **TSPL Builder**: Includes a helper utility (`TSPLBuilder`) to generating TSPL command strings fluently.
-- **Error Handling**: Provides feedback on connection failures and transmission errors.
-
-## ❌ What this library DOES NOT DO
-
-- **No Pairing/Scanning**: You must pair the printer in Android Settings first. This library only lists _already bonded_ devices.
-- **No Permission Management**: Your app is responsible for requesting `BLUETOOTH_CONNECT` and other necessary runtime permissions.
-- **No Image Processing**: Currently does not convert images to hex/binary for printing.
-- **No Encoding Magic**: Sends strings as UTF-8 bytes. Most thermal printers do not support UTF-8 directly. You must use standard ASCII or handle code pages manually (e.g., `CODEPAGE 1252`).
-
-## 📦 Installation
-
-```sh
-yarn add @bnnx/react-native-label-printer
-# or
-npm install @bnnx/react-native-label-printer
-```
-
-### Android Setup
-
-Since this library uses Bluetooth, you need to add permissions to your `AndroidManifest.xml`.
-
-**For Android 12+ (API 31+):**
-
-```xml
-<uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
-```
-
-**For Android 11 and below:**
-
-```xml
-<uses-permission android:name="android.permission.BLUETOOTH" />
-<uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
-```
-
-> **Important:** Your React Native app is responsible for requesting these permissions at runtime using a library like `react-native-permissions` before calling any method from this library.
-
-## 🚀 Usage
-
-### 1. Listing & Connecting
-
-This library only works with devices that are **already paired** in the Android Bluetooth settings.
-
-```typescript
-import {
-  listBondedDevices,
-  connect,
-  disconnect,
-} from '@bnnx/react-native-label-printer';
-
-// 1. List paired devices
-const devices = await listBondedDevices();
-console.log(devices);
-// Output: [{ name: "Printer_01", address: "00:11:22:33:44:55" }]
-
-// 2. Connect to a device
-try {
-  await connect('00:11:22:33:44:55');
-  console.log('Connected or already connected!');
-} catch (e) {
-  console.error('Connection failed', e);
-}
-
-// 3. Disconnect when done
-await disconnect();
-```
-
-### 2. Printing with TSPLBuilder
-
-Use the included `TSPLBuilder` to construct label commands easily.
-
-```typescript
-import { TSPLBuilder, sendRaw } from '@bnnx/react-native-label-printer';
-
-const command = new TSPLBuilder()
-  .size(50, 30) // Label size: 50mm x 30mm
-  .gap(2) // Gap: 2mm
-  .clear() // Clear buffer
-  .text(10, 10, 'Product Name')
-  .text(10, 50, 'Price: $19.99')
-  .barcode(10, 90, '12345678', '128', 50)
-  .qrCode(200, 10, 'https://example.com')
-  .print(1) // Print 1 copy
-  .build();
-
-try {
-  await sendRaw(command);
-  console.log('Print command sent!');
-} catch (e) {
-  console.error('Failed to send data (Check connection)', e);
-}
-```
-
-### 3. Printing Raw Strings (CPCL / ESC/POS)
-
-If you already have a command string (e.g., CPCL or ZPL), you can send it directly:
-
-```typescript
-import { sendRaw } from '@bnnx/react-native-label-printer';
-
-const cpclCommand = `
-! 0 200 200 210 1
-TEXT 4 0 30 40 Hello CPCL
-PRINT
-`;
-
-await sendRaw(cpclCommand);
-```
-
-### ⚠️ A Note on multiple labels
-
-To print multiple labels at once, simply concatenate the command strings. This is much faster than calling `sendRaw` multiple times.
-
-```typescript
-const label1 = new TSPLBuilder()...build();
-const label2 = new TSPLBuilder()...build();
-
-// Efficient: Send all at once
-await sendRaw(label1 + label2);
-```
-
-## 📖 API Reference
-
-### `listBondedDevices()`
-
-Returns a promise resolving to an array of bonded devices.
-
-- **Returns**: `Promise<{ name: string, address: string }[]>`
-
-### `connect(address: string)`
-
-Connects to the specified Bluetooth MAC address. If another device is connected, it _disconnects_ specifically within the native module scope before connecting the new one.
-
-- **Throws**: Error if connection fails or permission is denied.
-
-### `disconnect()`
-
-Closes the active Bluetooth socket. Always robust to call, even if already disconnected.
-
-### `sendRaw(data: string)`
-
-Sends a string to the open socket.
-
-- **Throws**: Error if not connected or if writing to the socket fails (e.g., printer turned off).
-
-## 📱 Example App
-
-This repository contains a full **example app** in the `/example` folder. It serves as "living documentation" demonstrating:
-
-- How to list devices.
-- How to manage connection state.
-- How to handle printer errors.
-- A recommended UI flow for printing.
-
-To run it:
-
-1. Clone the repo.
-2. `yarn install`
-3. `yarn example android`
-
-## 🔮 Roadmap
-
-- [ ] iOS Support (BLE/Classic constraints to be evaluated)
-- [ ] CPCLBuilder helper
-
-## 🤝 Contributing
-
-See the [contributing guide](CONTRIBUTING.md) to learn how to contribute to the repository and the development workflow.
-
-## 📄 License
-
-MIT
+- **Framework**: React Native 0.73+ (TurboModules / New Architecture)
+- **TypeScript**: Full type definitions
+- **Android**: Kotlin, `BluetoothLeScanner` + `BluetoothGatt`
+- **iOS**: Objective-C++, `CoreBluetooth`
 
 ---
 
-Made with ❤️ for the React Native community.
+## Prerequisites
+
+- React Native `0.73.0` or higher with New Architecture enabled
+- iOS 13+ / Android 6+ (API 23)
+
+## Getting Started
+
+### 1. Installation
+
+```bash
+yarn add @bnnx/react-native-label-printer
+```
+
+### 2. iOS Setup
+
+Add the following to `ios/YourAppName/Info.plist`:
+
+```xml
+<key>NSBluetoothAlwaysUsageDescription</key>
+<string>This app requires Bluetooth to connect to and print labels.</string>
+<key>NSBluetoothPeripheralUsageDescription</key>
+<string>This app requires Bluetooth to connect to and print labels.</string>
+```
+
+Install CocoaPods:
+
+```bash
+cd ios
+RCT_NEW_ARCH_ENABLED=1 pod install
+cd ..
+```
+
+### 3. Android Setup
+
+Add the following permissions to `android/app/src/main/AndroidManifest.xml`:
+
+```xml
+<!-- Android 11 and lower -->
+<uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+<uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="30" />
+
+<!-- Android 12+ -->
+<uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" />
+<uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+```
+
+Make sure your app requests these runtime permissions before scanning. A library like `react-native-permissions` is recommended.
+
+---
+
+## API Reference
+
+### Native Functions
+
+| Function | Description |
+| --- | --- |
+| `startScan()` | Starts BLE scanning for nearby thermal printers. Matches by known name prefixes and service UUIDs. |
+| `stopScan()` | Stops the current BLE scan. |
+| `connect(address: string): Promise<void>` | Connects to a printer by its address (MAC on Android, UUID on iOS). Handles MTU negotiation and characteristic discovery automatically. Times out after 5 seconds. |
+| `disconnect(): Promise<void>` | Disconnects from the currently connected printer. |
+| `sendRaw(data: string): Promise<void>` | Sends a raw UTF-8 string to the connected printer. Automatically chunks data based on the negotiated MTU. |
+
+### Events
+
+| Event | Callback | Description |
+| --- | --- | --- |
+| `onPrinterFound` | `(printer: { name: string; address: string }) => void` | Fired when a printer is discovered during scanning. |
+| `onPrinterDisconnected` | `(address: string) => void` | Fired when the connected printer is turned off or goes out of range. |
+
+### `useLabelPrinter` Hook
+
+The recommended way to use this library. Manages scanning, connection, and device lifecycle automatically.
+
+```tsx
+import { useLabelPrinter } from '@bnnx/react-native-label-printer';
+
+const {
+  devices,          // Device[] — discovered printers
+  isScanning,       // boolean
+  connectedDevice,  // Device | null
+  isConnecting,     // boolean
+  startScan,        // () => void — clears list and starts scanning
+  stopScan,         // () => void
+  connect,          // (address: string) => Promise<void>
+  disconnect,       // () => Promise<void>
+} = useLabelPrinter({
+  cleanupIntervalMs: 2000,  // How often stale devices are removed (default: 2000)
+  deviceTimeoutMs: 10000,   // Max age before a device is removed. 0 to disable (default: 10000)
+});
+```
+
+**`Device` type:**
+
+```typescript
+type Device = {
+  name: string;
+  address: string;
+  lastSeen?: number;
+};
+```
+
+---
+
+## Usage Example
+
+A complete scanning, connecting, and printing flow:
+
+```tsx
+import React from 'react';
+import { View, Text, TouchableOpacity } from 'react-native';
+import { sendRaw, TSPLBuilder, useLabelPrinter } from '@bnnx/react-native-label-printer';
+
+export default function PrinterDemo() {
+  const { devices, connectedDevice, startScan, connect, disconnect } = useLabelPrinter();
+
+  const handleConnect = async (address: string) => {
+    if (connectedDevice) await disconnect();
+    await connect(address);
+  };
+
+  const handlePrint = async () => {
+    const payload = new TSPLBuilder()
+      .size(50, 30)
+      .gap(2)
+      .clear()
+      .text(10, 10, 'Hello World!')
+      .barcode(10, 50, '12345678', '128', 40)
+      .qrCode(250, 10, 'https://example.com', { cellWidth: 4 })
+      .print(1)
+      .build();
+
+    await sendRaw(payload);
+  };
+
+  return (
+    <View style={{ flex: 1, paddingTop: 50 }}>
+      <TouchableOpacity onPress={() => startScan()}>
+        <Text>SCAN</Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity onPress={handlePrint} disabled={!connectedDevice}>
+        <Text>PRINT LABEL</Text>
+      </TouchableOpacity>
+
+      {devices.map((p) => (
+        <TouchableOpacity key={p.address} onPress={() => handleConnect(p.address)}>
+          <Text>{p.name} - {p.address}</Text>
+        </TouchableOpacity>
+      ))}
+    </View>
+  );
+}
+```
+
+---
+
+## TSPLBuilder
+
+Chainable builder for constructing TSPL command payloads.
+
+```typescript
+const payload = new TSPLBuilder()
+  .size(width, height)                          // Label dimensions (mm)
+  .gap(gapSize, offsetMm?)                      // Gap between labels (mm)
+  .cls()                                        // Clear image buffer (alias: .clear())
+  .codePage(value)                              // Set code page (e.g. "1252" for Latin-1)
+  .direction(0 | 1)                             // Print direction
+  .reference(x, y)                              // Reference point
+  .density(0-15)                                // Print density
+  .speed(value)                                 // Print speed
+  .feed(mm)                                     // Feed paper
+  .text(x, y, content, options?)                // Draw text
+  .barcode(x, y, content, type?, height?, options?)  // Draw barcode
+  .qrCode(x, y, content, options?)              // Draw QR code
+  .box(x, y, xEnd, yEnd, thickness?)            // Draw box
+  .print(copies)                                // Print command
+  .build();                                     // Build final string
+```
+
+## Contributing
+
+See the [contributing guide](CONTRIBUTING.md) to learn how to contribute to the repository and the development workflow.
+
+## License
+
+MIT

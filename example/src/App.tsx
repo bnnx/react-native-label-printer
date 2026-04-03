@@ -14,23 +14,17 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   check,
   request,
+  requestMultiple,
   PERMISSIONS,
   RESULTS,
   openSettings,
 } from 'react-native-permissions';
 import {
-  listBondedDevices,
-  connect,
-  disconnect,
   sendRaw,
   TSPLBuilder,
+  useLabelPrinter,
 } from '@bnnx/react-native-label-printer';
 
-/*
- * ----------------------------------------------------------------------
- * Example Data for Printing
- * ----------------------------------------------------------------------
- */
 const DEMO_LABEL = {
   id: '006c2c24-b45d-4bf1-baae-2a94f40ebc38',
   name: 'My Store',
@@ -41,116 +35,101 @@ const DEMO_LABEL = {
   code: '0126/1-001-001',
 };
 
-type Device = { name: string; address: string };
+type Device = {
+  name: string;
+  address: string;
+  lastSeen?: number;
+};
+
+function usePermissions() {
+  const [hasPermission, setHasPermission] = useState(true);
+
+  const requestBluetoothPermission = useCallback(async () => {
+    let granted = false;
+    if (Platform.OS === 'ios') {
+      const result = await check(PERMISSIONS.IOS.BLUETOOTH);
+      if (result === RESULTS.GRANTED) granted = true;
+      else
+        granted =
+          (await request(PERMISSIONS.IOS.BLUETOOTH)) === RESULTS.GRANTED;
+    } else if (Platform.OS === 'android') {
+      if (Platform.Version >= 31) {
+        const statuses = await requestMultiple([
+          PERMISSIONS.ANDROID.BLUETOOTH_SCAN,
+          PERMISSIONS.ANDROID.BLUETOOTH_CONNECT,
+        ]);
+        granted =
+          statuses[PERMISSIONS.ANDROID.BLUETOOTH_SCAN] === RESULTS.GRANTED &&
+          statuses[PERMISSIONS.ANDROID.BLUETOOTH_CONNECT] === RESULTS.GRANTED;
+      } else {
+        granted =
+          (await request(PERMISSIONS.ANDROID.ACCESS_FINE_LOCATION)) ===
+          RESULTS.GRANTED;
+      }
+    }
+
+    setHasPermission(granted);
+    return granted;
+  }, []);
+
+  return { hasPermission, requestBluetoothPermission };
+}
 
 export default function App() {
-  const [devices, setDevices] = useState<Device[]>([]);
-  const [connectedDevice, setConnectedDevice] = useState<Device | null>(null);
+  const { hasPermission, requestBluetoothPermission } = usePermissions();
+  const {
+    devices,
+    isScanning,
+    connectedDevice,
+    isConnecting,
+    startScan: startScanningBase,
+    connect: handleConnect,
+    disconnect: handleDisconnect,
+  } = useLabelPrinter({
+    cleanupIntervalMs: 2000,
+    deviceTimeoutMs: 10000,
+  });
 
-  const [isScanning, setIsScanning] = useState(false);
-  const [isConnecting, setIsConnecting] = useState(false);
   const [isPrinting, setIsPrinting] = useState(false);
   const [permissionDenied, setPermissionDenied] = useState(false);
 
-  /*
-   * ----------------------------------------------------------------------
-   * 1. Permissions Handling (Android 12+ requires BLUETOOTH_CONNECT)
-   * ----------------------------------------------------------------------
-   */
-  const requestBluetoothPermission = useCallback(async () => {
-    if (Platform.OS !== 'android') return true;
+  const startScanning = useCallback(async () => {
+    const granted = await requestBluetoothPermission();
+    if (!granted) return false;
+    startScanningBase();
+    return true;
+  }, [requestBluetoothPermission, startScanningBase]);
 
-    const permission = PERMISSIONS.ANDROID.BLUETOOTH_CONNECT;
-    const result = await check(permission);
-
-    if (result === RESULTS.GRANTED || result === RESULTS.UNAVAILABLE)
-      return true;
-
-    if (result === RESULTS.DENIED || result === RESULTS.LIMITED) {
-      const newResult = await request(permission);
-      return newResult === RESULTS.GRANTED;
-    }
-
-    if (result === RESULTS.BLOCKED) {
-      Alert.alert(
-        'Permission Required',
-        'Bluetooth Connect permission is required. Please enable it in Settings.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Open Settings', onPress: openSettings },
-        ]
-      );
-    }
-    return false;
-  }, []);
-
-  /*
-   * ----------------------------------------------------------------------
-   * 2. Device Management (List & Connect)
-   * ----------------------------------------------------------------------
-   */
-  const loadDevices = useCallback(async () => {
-    setIsScanning(true);
-    setPermissionDenied(false);
-    try {
-      const hasPermission = await requestBluetoothPermission();
-      if (!hasPermission) {
-        setPermissionDenied(true);
-        return;
-      }
-
-      const list = await listBondedDevices();
-      setDevices(list);
-    } catch {
-      Alert.alert('Error', 'Failed to list paired devices');
-    } finally {
-      setIsScanning(false);
-    }
-  }, [requestBluetoothPermission]);
-
-  const handleToggleConnection = async (device: Device) => {
+  const toggleConnection = async (device: Device) => {
     if (connectedDevice?.address === device.address) {
-      setIsConnecting(true);
-      try {
-        await disconnect();
-        setConnectedDevice(null);
-      } catch {
-        Alert.alert('Error', 'Failed to disconnect');
-      } finally {
-        setIsConnecting(false);
-      }
+      await handleDisconnect();
       return;
     }
-
-    setIsConnecting(true);
-    try {
-      const hasPermission = await requestBluetoothPermission();
-      if (!hasPermission) return;
-
-      await connect(device.address);
-      setConnectedDevice(device);
-    } catch {
-      Alert.alert('Connection Failed', `Could not connect to ${device.name}`);
-    } finally {
-      setIsConnecting(false);
-    }
+    const granted = await requestBluetoothPermission();
+    if (!granted) return;
+    await handleConnect(device.address);
   };
 
-  /*
-   * ----------------------------------------------------------------------
-   * 3. Printing Logic (TSPL Example)
-   * ----------------------------------------------------------------------
-   */
+  useEffect(() => {
+    startScanning().then((started) => {
+      setPermissionDenied(!started);
+    });
+  }, [startScanning]);
+
+  const handleManualScan = async () => {
+    const started = await startScanning();
+    setPermissionDenied(!started);
+  };
+
   const handlePrint = async () => {
     if (!connectedDevice) return;
 
     setIsPrinting(true);
     try {
-      // Build TSPL command
       const verticalLabelCommand = new TSPLBuilder()
-        .size(50, 30) // Label size in mm
-        .gap(2) // Gap size in mm
-        .clear() // Clear buffer
+        .size(50, 30)
+        .gap(2)
+        .clear()
         .text(10, 220, DEMO_LABEL.name, { rotation: 270 })
         .text(50, 220, DEMO_LABEL.description, { rotation: 270 })
         .text(80, 220, `Size: ${DEMO_LABEL.size}`, { rotation: 270 })
@@ -164,9 +143,9 @@ export default function App() {
         .build();
 
       const horizontalLabelCommand = new TSPLBuilder()
-        .size(50, 30) // Label size in mm
-        .gap(2) // Gap size in mm
-        .clear() // Clear buffer
+        .size(50, 30)
+        .gap(2)
+        .clear()
         .text(10, 10, DEMO_LABEL.name)
         .text(10, 50, DEMO_LABEL.description)
         .text(10, 80, `Size: ${DEMO_LABEL.size}`)
@@ -182,22 +161,12 @@ export default function App() {
       await sendRaw(payload);
     } catch {
       Alert.alert('Print Error', 'Lost connection to printer.');
-      setConnectedDevice(null);
-      await disconnect();
+      await toggleConnection(connectedDevice);
     } finally {
       setIsPrinting(false);
     }
   };
 
-  useEffect(() => {
-    loadDevices();
-  }, [loadDevices]);
-
-  /*
-   * ----------------------------------------------------------------------
-   * 4. UI Rendering
-   * ----------------------------------------------------------------------
-   */
   const renderDevice = ({ item }: { item: Device }) => {
     const isConnected = connectedDevice?.address === item.address;
     const isOtherConnected = !!connectedDevice && !isConnected;
@@ -209,7 +178,7 @@ export default function App() {
           isConnected && styles.deviceItemActive,
           isOtherConnected && styles.deviceItemDisabled,
         ]}
-        onPress={() => handleToggleConnection(item)}
+        onPress={() => toggleConnection(item)}
         disabled={isConnecting || isOtherConnected}
         activeOpacity={0.7}
       >
@@ -262,14 +231,18 @@ export default function App() {
       </View>
 
       <View style={styles.content}>
-        {isScanning ? (
-          <View style={styles.centerContainer}>
-            <ActivityIndicator size="large" color="#007AFF" />
-            <Text style={styles.loadingText}>Listing paired devices...</Text>
+        {isScanning && (
+          <View style={styles.scanningIndicator}>
+            <ActivityIndicator size="small" color="#007AFF" />
+            <Text style={styles.scanningText}>
+              Searching for nearby printers...
+            </Text>
           </View>
-        ) : devices.length === 0 ? (
+        )}
+
+        {devices.length === 0 && !isScanning ? (
           <View style={styles.centerContainer}>
-            {permissionDenied ? (
+            {permissionDenied || !hasPermission ? (
               <>
                 <Text style={styles.emptyTitle}>Permission Denied</Text>
                 <Text style={styles.emptyText}>
@@ -286,10 +259,10 @@ export default function App() {
               <>
                 <Text style={styles.emptyTitle}>No Devices Found</Text>
                 <Text style={styles.emptyText}>
-                  Pair a generic Bluetooth printer in Android settings first.
+                  Ensure location and bluetooth are enabled, then scan again.
                 </Text>
                 <TouchableOpacity
-                  onPress={loadDevices}
+                  onPress={handleManualScan}
                   style={styles.secondaryButton}
                 >
                   <Text style={styles.secondaryButtonText}>Reload</Text>
@@ -303,8 +276,6 @@ export default function App() {
             renderItem={renderDevice}
             keyExtractor={(item) => item.address}
             contentContainerStyle={styles.list}
-            refreshing={isScanning}
-            onRefresh={loadDevices}
           />
         )}
       </View>
@@ -322,10 +293,7 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F5F5F7',
-  },
+  container: { flex: 1, backgroundColor: '#F5F5F7' },
   header: {
     padding: 24,
     backgroundColor: '#FFFFFF',
@@ -340,23 +308,10 @@ const styles = StyleSheet.create({
     shadowRadius: 5,
     shadowOffset: { width: 0, height: 2 },
   },
-  title: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: '#000',
-  },
-  subtitle: {
-    fontSize: 13,
-    color: '#8E8E93',
-    fontWeight: '500',
-    marginTop: 2,
-  },
-  content: {
-    flex: 1,
-  },
-  list: {
-    padding: 20,
-  },
+  title: { fontSize: 22, fontWeight: '800', color: '#000' },
+  subtitle: { fontSize: 13, color: '#8E8E93', fontWeight: '500', marginTop: 2 },
+  content: { flex: 1 },
+  list: { padding: 20 },
   deviceItem: {
     backgroundColor: '#FFFFFF',
     borderRadius: 16,
@@ -366,26 +321,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
     shadowRadius: 3.84,
     elevation: 2,
     borderWidth: 1,
     borderColor: 'transparent',
   },
-  deviceItemActive: {
-    borderColor: '#34C759',
-    backgroundColor: '#F2FFF5',
-  },
-  deviceItemDisabled: {
-    opacity: 0.5,
-  },
-  deviceInfo: {
-    flex: 1,
-  },
+  deviceItemActive: { borderColor: '#34C759', backgroundColor: '#F2FFF5' },
+  deviceItemDisabled: { opacity: 0.5 },
+  deviceInfo: { flex: 1 },
   deviceName: {
     fontSize: 16,
     fontWeight: '700',
@@ -397,11 +342,7 @@ const styles = StyleSheet.create({
     color: '#8E8E93',
     fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
   },
-  connectLink: {
-    color: '#007AFF',
-    fontWeight: '600',
-    fontSize: 14,
-  },
+  connectLink: { color: '#007AFF', fontWeight: '600', fontSize: 14 },
   statusBadge: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -417,11 +358,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFF',
     marginRight: 6,
   },
-  statusText: {
-    color: '#FFF',
-    fontSize: 12,
-    fontWeight: '700',
-  },
+  statusText: { color: '#FFF', fontSize: 12, fontWeight: '700' },
   printButton: {
     backgroundColor: '#007AFF',
     paddingHorizontal: 20,
@@ -430,11 +367,7 @@ const styles = StyleSheet.create({
     minWidth: 80,
     alignItems: 'center',
   },
-  printButtonText: {
-    color: '#FFF',
-    fontWeight: '600',
-    fontSize: 14,
-  },
+  printButtonText: { color: '#FFF', fontWeight: '600', fontSize: 14 },
   secondaryButton: {
     marginTop: 16,
     paddingHorizontal: 20,
@@ -442,24 +375,14 @@ const styles = StyleSheet.create({
     backgroundColor: '#E5F1FF',
     borderRadius: 12,
   },
-  secondaryButtonText: {
-    color: '#007AFF',
-    fontWeight: '600',
-  },
+  secondaryButtonText: { color: '#007AFF', fontWeight: '600' },
   actionButton: {},
-  buttonDisabled: {
-    opacity: 0.7,
-  },
+  buttonDisabled: { opacity: 0.7 },
   centerContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     padding: 32,
-  },
-  loadingText: {
-    marginTop: 16,
-    fontSize: 16,
-    color: '#8E8E93',
   },
   emptyTitle: {
     fontSize: 18,
@@ -485,10 +408,7 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     alignItems: 'center',
     shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
+    shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.1,
     shadowRadius: 10,
     elevation: 10,
@@ -498,5 +418,20 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#000',
+  },
+  scanningIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    backgroundColor: '#E5F1FF',
+    borderBottomWidth: 1,
+    borderBottomColor: '#D1E5FF',
+  },
+  scanningText: {
+    marginLeft: 10,
+    fontSize: 13,
+    color: '#007AFF',
+    fontWeight: '600',
   },
 });

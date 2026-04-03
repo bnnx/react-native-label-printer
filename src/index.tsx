@@ -1,7 +1,24 @@
+import { NativeEventEmitter } from 'react-native';
 import LabelPrinter from './NativeLabelPrinter';
 
-export function listBondedDevices() {
-  return LabelPrinter.listBondedDevices();
+const eventEmitter = new NativeEventEmitter(LabelPrinter as any);
+
+export function startScan() {
+  LabelPrinter.startScan();
+}
+
+export function stopScan() {
+  LabelPrinter.stopScan();
+}
+
+export function onPrinterFound(
+  callback: (printer: { name: string; address: string }) => void
+) {
+  return eventEmitter.addListener('onPrinterFound', callback as any);
+}
+
+export function onPrinterDisconnected(callback: (address: string) => void) {
+  return eventEmitter.addListener('onPrinterDisconnected', callback as any);
 }
 
 export function connect(address: string) {
@@ -17,3 +34,4 @@ export function sendRaw(data: string) {
 }
 
 export * from './TSPLBuilder';
+export * from './hooks';
