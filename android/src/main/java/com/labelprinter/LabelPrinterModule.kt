@@ -237,21 +237,44 @@ class LabelPrinterModule(reactContext: ReactApplicationContext) :
     isWriting = true
     sendPromise = promise
     
-    val bytes = data.toByteArray(Charsets.UTF_8)
-    val chunkSize = Math.max(20, currentMtu - 3)
+    // Cap write size to 150 bytes to avoid printer firmware issues with large single BLE writes.
+    // Many cheap BLE thermal printers cannot reliably process payloads > ~180 bytes.
+    val maxMtu = Math.max(20, currentMtu - 3)
+    val chunkSize = Math.min(150, maxMtu)
 
+    // Split on line boundaries to avoid breaking TSPL commands across BLE writes.
+    // The printer firmware cannot reassemble commands split across separate writes.
     writeQueue.clear()
-    var offset = 0
-    while (offset < bytes.size) {
-      val length = Math.min(chunkSize, bytes.size - offset)
-      val chunk = bytes.copyOfRange(offset, offset + length)
-      writeQueue.add(chunk)
-      offset += length
+    var currentChunk = ByteArray(0)
+    
+    for (line in data.split("\n")) {
+      if (line.isEmpty()) continue
+      
+      val lineBytes = (line + "\n").toByteArray(Charsets.UTF_8)
+      
+      // If adding this line would exceed max, flush the current chunk first
+      if (currentChunk.isNotEmpty() && currentChunk.size + lineBytes.size > chunkSize) {
+        writeQueue.add(currentChunk)
+        currentChunk = ByteArray(0)
+      }
+      
+      // If a single line is larger than chunkSize, send it as its own chunk
+      if (lineBytes.size > chunkSize) {
+        writeQueue.add(lineBytes)
+      } else {
+        currentChunk = currentChunk + lineBytes
+      }
+    }
+    
+    // Flush remaining data
+    if (currentChunk.isNotEmpty()) {
+      writeQueue.add(currentChunk)
     }
 
     sendNextChunkInQueue()
   }
 
+  @Suppress("DEPRECATION")
   private fun sendNextChunkInQueue() {
     val chunk = writeQueue.poll()
     if (chunk == null) {
@@ -262,7 +285,6 @@ class LabelPrinterModule(reactContext: ReactApplicationContext) :
     }
 
     val char = writeCharacteristic ?: return
-    char.value = chunk
 
     val props = char.properties
     val writeType = if ((props and BluetoothGattCharacteristic.PROPERTY_WRITE) != 0) {
@@ -270,9 +292,16 @@ class LabelPrinterModule(reactContext: ReactApplicationContext) :
     } else {
       BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
     }
-    char.writeType = writeType
 
-    val success = bluetoothGatt?.writeCharacteristic(char) ?: false
+    val success = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+      val result = bluetoothGatt?.writeCharacteristic(char, chunk, writeType)
+      result == android.bluetooth.BluetoothStatusCodes.SUCCESS
+    } else {
+      char.value = chunk
+      char.writeType = writeType
+      bluetoothGatt?.writeCharacteristic(char) ?: false
+    }
+
     if (!success) {
       isWriting = false
       writeQueue.clear()

@@ -15,6 +15,7 @@
 @property (nonatomic, strong) RCTPromiseRejectBlock sendReject;
 
 @property (nonatomic, assign) BOOL isWriting;
+@property (nonatomic, strong) NSMutableArray<NSData *> *writeQueue;
 
 @end
 
@@ -27,6 +28,7 @@ RCT_EXPORT_MODULE()
   if (self) {
     _centralManager = [[CBCentralManager alloc] initWithDelegate:self queue:dispatch_get_main_queue()];
     _discoveredPeripherals = [NSMutableDictionary new];
+    _writeQueue = [NSMutableArray new];
   }
   return self;
 }
@@ -104,12 +106,6 @@ RCT_EXPORT_MODULE()
   self.sendResolve = resolve;
   self.sendReject = reject;
   
-  NSData *payload = [data dataUsingEncoding:NSUTF8StringEncoding];
-  
-  [self writeData:payload];
-}
-
-- (void)writeData:(NSData *)payload {
   CBCharacteristicWriteType type = CBCharacteristicWriteWithResponse;
   if ((self.writeCharacteristic.properties & CBCharacteristicPropertyWrite) != 0) {
       type = CBCharacteristicWriteWithResponse;
@@ -117,15 +113,74 @@ RCT_EXPORT_MODULE()
       type = CBCharacteristicWriteWithoutResponse;
   }
   
-  [self.connectedPeripheral writeValue:payload forCharacteristic:self.writeCharacteristic type:type];
+  NSUInteger reportedMax = [self.connectedPeripheral maximumWriteValueLengthForType:type];
+  // Cap write size to avoid printer firmware issues with large single BLE writes.
+  // Many cheap BLE thermal printers cannot reliably process payloads > ~180 bytes
+  // in a single write, causing data at the end (e.g. QR codes) to be silently dropped.
+  NSUInteger maxLen = MIN(reportedMax, 150);
+  if (maxLen < 20) maxLen = 20;
+  
+  [self.writeQueue removeAllObjects];
+  
+  // Split on line boundaries to ensure each BLE write contains only complete TSPL commands.
+  NSArray<NSString *> *lines = [data componentsSeparatedByString:@"\n"];
+  NSMutableData *currentChunk = [NSMutableData new];
+  
+  for (NSString *line in lines) {
+    if (line.length == 0) continue;
+    
+    NSData *lineData = [[line stringByAppendingString:@"\n"] dataUsingEncoding:NSUTF8StringEncoding];
+    
+    if (currentChunk.length > 0 && currentChunk.length + lineData.length > maxLen) {
+      [self.writeQueue addObject:[currentChunk copy]];
+      currentChunk = [NSMutableData new];
+    }
+    
+    if (lineData.length > maxLen) {
+      [self.writeQueue addObject:lineData];
+    } else {
+      [currentChunk appendData:lineData];
+    }
+  }
+  
+  if (currentChunk.length > 0) {
+    [self.writeQueue addObject:[currentChunk copy]];
+  }
+  
+  [self sendNextChunk];
+}
+
+- (void)sendNextChunk {
+  if (self.writeQueue.count == 0) {
+    self.isWriting = NO;
+
+    if (self.sendResolve) {
+      self.sendResolve(@(YES));
+      self.sendResolve = nil;
+      self.sendReject = nil;
+    }
+    return;
+  }
+  
+  NSData *chunk = self.writeQueue.firstObject;
+  [self.writeQueue removeObjectAtIndex:0];
+  
+  CBCharacteristicWriteType type = CBCharacteristicWriteWithResponse;
+  if ((self.writeCharacteristic.properties & CBCharacteristicPropertyWrite) != 0) {
+      type = CBCharacteristicWriteWithResponse;
+  } else if ((self.writeCharacteristic.properties & CBCharacteristicPropertyWriteWithoutResponse) != 0) {
+      type = CBCharacteristicWriteWithoutResponse;
+  }
+  
+
+  [self.connectedPeripheral writeValue:chunk forCharacteristic:self.writeCharacteristic type:type];
   
   if (type == CBCharacteristicWriteWithoutResponse) {
-      self.isWriting = NO;
-      if (self.sendResolve) {
-          self.sendResolve(@(YES));
-          self.sendResolve = nil;
-          self.sendReject = nil;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(10 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+      if (self.isWriting) {
+        [self sendNextChunk];
       }
+    });
   }
 }
 
@@ -138,6 +193,7 @@ RCT_EXPORT_MODULE()
   self.connectedPeripheral = nil;
   self.writeCharacteristic = nil;
   self.isWriting = NO;
+  [self.writeQueue removeAllObjects];
   
   if (self.connectReject) {
     self.connectReject(@"DISCONNECTED", @"Disconnected", nil);
@@ -258,7 +314,9 @@ RCT_EXPORT_MODULE()
 }
 - (void)peripheral:(CBPeripheral *)peripheral didWriteValueForCharacteristic:(CBCharacteristic *)characteristic error:(NSError *)error {
   if (error) {
+
     self.isWriting = NO;
+    [self.writeQueue removeAllObjects];
     if (self.sendReject) {
       self.sendReject(@"WRITE_ERROR", error.localizedDescription, nil);
       self.sendReject = nil;
@@ -267,12 +325,8 @@ RCT_EXPORT_MODULE()
     return;
   }
   
-  self.isWriting = NO;
-  if (self.sendResolve) {
-      self.sendResolve(@(YES));
-      self.sendResolve = nil;
-      self.sendReject = nil;
-  }
+
+  [self sendNextChunk];
 }
 
 - (void)peripheralIsReadyToSendWriteWithoutResponse:(CBPeripheral *)peripheral {}
