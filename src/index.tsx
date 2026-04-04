@@ -21,6 +21,10 @@ export function onPrinterDisconnected(callback: (address: string) => void) {
   return eventEmitter.addListener('onPrinterDisconnected', callback as any);
 }
 
+export function onBluetoothStateChange(callback: (isEnabled: boolean) => void) {
+  return eventEmitter.addListener('onBluetoothStateChange', callback as any);
+}
+
 export function connect(address: string) {
   return LabelPrinter.connect(address);
 }
@@ -31,6 +35,10 @@ export function disconnect() {
 
 export function sendRaw(data: string) {
   return LabelPrinter.sendRaw(data);
+}
+
+export function isBluetoothEnabled(): Promise<boolean> {
+  return LabelPrinter.isBluetoothEnabled();
 }
 
 export * from './TSPLBuilder';

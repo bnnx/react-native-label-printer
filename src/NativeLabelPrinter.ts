@@ -6,6 +6,7 @@ export interface Spec extends TurboModule {
   connect(address: string): Promise<void>;
   disconnect(): Promise<void>;
   sendRaw(data: string): Promise<void>;
+  isBluetoothEnabled(): Promise<boolean>;
   addListener(eventName: string): void;
   removeListeners(count: number): void;
 }

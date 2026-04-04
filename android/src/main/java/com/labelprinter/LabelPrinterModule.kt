@@ -10,7 +10,10 @@ import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -36,9 +39,40 @@ class LabelPrinterModule(reactContext: ReactApplicationContext) :
   private var currentMtu = 23
   private val writeQueue = ConcurrentLinkedQueue<ByteArray>()
 
+  private val bluetoothStateReceiver = object : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+      if (intent.action == BluetoothAdapter.ACTION_STATE_CHANGED) {
+        val state = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)
+        val isEnabled = state == BluetoothAdapter.STATE_ON
+        
+        reactApplicationContext
+          .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+          .emit("onBluetoothStateChange", isEnabled)
+      }
+    }
+  }
+
   init {
     val bluetoothManager = reactContext.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager?
     bluetoothAdapter = bluetoothManager?.adapter
+    
+    val filter = IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED)
+    reactContext.registerReceiver(bluetoothStateReceiver, filter)
+  }
+
+  override fun invalidate() {
+    super.invalidate()
+    try {
+      reactApplicationContext.unregisterReceiver(bluetoothStateReceiver)
+    } catch (e: Exception) {}
+  }
+
+  override fun isBluetoothEnabled(promise: Promise) {
+    if (bluetoothAdapter != null) {
+      promise.resolve(bluetoothAdapter!!.isEnabled)
+    } else {
+      promise.resolve(false)
+    }
   }
 
   companion object {

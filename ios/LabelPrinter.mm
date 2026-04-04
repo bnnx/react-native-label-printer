@@ -38,7 +38,7 @@ RCT_EXPORT_MODULE()
 }
 
 - (NSArray<NSString *> *)supportedEvents {
-  return @[@"onPrinterFound", @"onPrinterDisconnected"];
+  return @[@"onPrinterFound", @"onPrinterDisconnected", @"onBluetoothStateChange"];
 }
 
 - (void)startScan {
@@ -89,6 +89,11 @@ RCT_EXPORT_MODULE()
 - (void)disconnect:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject {
   [self closeConnection];
   resolve(@(YES));
+}
+
+- (void)isBluetoothEnabled:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject {
+  BOOL isEnabled = (self.centralManager.state == CBManagerStatePoweredOn);
+  resolve(@(isEnabled));
 }
 
 - (void)sendRaw:(NSString *)data resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject {
@@ -215,6 +220,8 @@ RCT_EXPORT_MODULE()
 #pragma mark - CBCentralManagerDelegate
 
 - (void)centralManagerDidUpdateState:(CBCentralManager *)central {
+  BOOL isEnabled = (central.state == CBManagerStatePoweredOn);
+  [self sendEventWithName:@"onBluetoothStateChange" body:@(isEnabled)];
 }
 
 - (void)centralManager:(CBCentralManager *)central didDiscoverPeripheral:(CBPeripheral *)peripheral advertisementData:(NSDictionary<NSString *,id> *)advertisementData RSSI:(NSNumber *)RSSI {
