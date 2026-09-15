@@ -82,7 +82,8 @@ Make sure your app requests these runtime permissions before scanning. A library
 | `stopScan()` | Stops the current BLE scan. |
 | `connect(address: string): Promise<void>` | Connects to a printer by its address (MAC on Android, UUID on iOS). Handles MTU negotiation and characteristic discovery automatically. Times out after 5 seconds. |
 | `disconnect(): Promise<void>` | Disconnects from the currently connected printer. |
-| `sendRaw(data: string): Promise<void>` | Sends a raw UTF-8 string to the connected printer. Automatically chunks data based on the negotiated MTU. |
+| `sendRaw(data: string): Promise<void>` | Sends a raw UTF-8 string to the connected printer. Automatically chunks data on line boundaries based on the negotiated MTU. |
+| `sendBytes(bytes: Uint8Array): Promise<void>` | Sends binary data (bitmaps, ESC/POS raster) to the connected printer. Chunks the payload in fixed-size BLE writes. |
 
 ### Events
 
@@ -197,9 +198,48 @@ const payload = new TSPLBuilder()
   .barcode(x, y, content, type?, height?, options?)  // Draw barcode
   .qrCode(x, y, content, options?)              // Draw QR code
   .box(x, y, xEnd, yEnd, thickness?)            // Draw box
+  .bitmap(x, y, monoBitmap, mode?)              // Draw a MonoBitmap (binary)
   .print(copies)                                // Print command
-  .build();                                     // Build final string
+  .build();                                     // Build final string (text-only labels)
 ```
+
+Labels that contain a bitmap are binary, so build them with `buildBytes()` and send with `sendBytes()`:
+
+```typescript
+const bytes = new TSPLBuilder()
+  .size(50, 30)
+  .gap(2)
+  .cls()
+  .bitmap(0, 0, bitmap)
+  .print(1)
+  .buildBytes();
+
+await sendBytes(bytes);
+```
+
+## ESCPOSBuilder
+
+Chainable builder for ESC/POS receipt printers. It is focused on raster printing: render the label as a `MonoBitmap` and send it as `GS v 0` raster graphics.
+
+```typescript
+const bytes = new ESCPOSBuilder()
+  .initialize()                                 // ESC @
+  .align('left' | 'center' | 'right')           // ESC a n
+  .leftMargin(dots)                             // GS L nL nH
+  .raster(monoBitmap, { bandHeight? })          // GS v 0 (streamed in bands)
+  .feed(lines)                                  // ESC d n
+  .feedDots(dots)                               // ESC J n
+  .formFeed()                                   // FF
+  .labelFeed()                                  // GS FF (label firmware only)
+  .raw(bytes)                                   // Arbitrary bytes
+  .build();                                     // Uint8Array
+
+await sendBytes(bytes);
+```
+
+## MonoBitmap
+
+Both builders accept a `MonoBitmap`: one byte per pixel, row-major, any non-zero value is black. Create one with `createMonoBitmap(width, height)` and draw into `data` with your own renderer. For 58mm paper at 203 dpi the printable width is 384 dots (48 bytes per row).
 
 ## Contributing
 

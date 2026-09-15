@@ -17,6 +17,7 @@ import android.content.IntentFilter
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.util.Base64
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
@@ -257,28 +258,37 @@ class LabelPrinterModule(reactContext: ReactApplicationContext) :
     }
   }
 
-  override fun sendRaw(data: String, promise: Promise) {
+  private fun beginSend(promise: Promise): Boolean {
     if (bluetoothGatt == null || writeCharacteristic == null) {
       promise.reject("NOT_CONNECTED", "Printer is not connected")
-      return
+      return false
     }
 
     if (isWriting) {
       promise.reject("BUSY", "Already writing data")
-      return
+      return false
     }
 
     isWriting = true
     sendPromise = promise
-    
-    // Cap write size to 150 bytes to avoid printer firmware issues with large single BLE writes.
-    // Many cheap BLE thermal printers cannot reliably process payloads > ~180 bytes.
+    writeQueue.clear()
+    return true
+  }
+
+  // Cap write size to 150 bytes to avoid printer firmware issues with large single BLE writes.
+  // Many cheap BLE thermal printers cannot reliably process payloads > ~180 bytes.
+  private fun chunkSize(): Int {
     val maxMtu = Math.max(20, currentMtu - 3)
-    val chunkSize = Math.min(150, maxMtu)
+    return Math.min(150, maxMtu)
+  }
+
+  override fun sendRaw(data: String, promise: Promise) {
+    if (!beginSend(promise)) return
+
+    val chunkSize = chunkSize()
 
     // Split on line boundaries to avoid breaking TSPL commands across BLE writes.
     // The printer firmware cannot reassemble commands split across separate writes.
-    writeQueue.clear()
     var currentChunk = ByteArray(0)
     
     for (line in data.split("\n")) {
@@ -303,6 +313,31 @@ class LabelPrinterModule(reactContext: ReactApplicationContext) :
     // Flush remaining data
     if (currentChunk.isNotEmpty()) {
       writeQueue.add(currentChunk)
+    }
+
+    sendNextChunkInQueue()
+  }
+
+  override fun sendBytes(data: String, promise: Promise) {
+    if (!beginSend(promise)) return
+
+    val bytes = try {
+      Base64.decode(data, Base64.DEFAULT)
+    } catch (e: IllegalArgumentException) {
+      isWriting = false
+      sendPromise = null
+      promise.reject("INVALID_DATA", "Data is not valid base64")
+      return
+    }
+
+    // Binary payloads (bitmaps, raster graphics) have no line structure,
+    // so they are split into fixed-size chunks and streamed in order.
+    val chunkSize = chunkSize()
+    var offset = 0
+    while (offset < bytes.size) {
+      val end = Math.min(offset + chunkSize, bytes.size)
+      writeQueue.add(bytes.copyOfRange(offset, end))
+      offset = end
     }
 
     sendNextChunkInQueue()

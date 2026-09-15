@@ -96,36 +96,48 @@ RCT_EXPORT_MODULE()
   resolve(@(isEnabled));
 }
 
-- (void)sendRaw:(NSString *)data resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject {
+- (BOOL)beginSendWithResolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject {
   if (!self.connectedPeripheral || !self.writeCharacteristic) {
     reject(@"NOT_CONNECTED", @"Printer is not connected", nil);
-    return;
+    return NO;
   }
   
   if (self.isWriting) {
     reject(@"BUSY", @"Already sending data", nil);
-    return;
+    return NO;
   }
   
   self.isWriting = YES;
   self.sendResolve = resolve;
   self.sendReject = reject;
-  
-  CBCharacteristicWriteType type = CBCharacteristicWriteWithResponse;
+  [self.writeQueue removeAllObjects];
+  return YES;
+}
+
+- (CBCharacteristicWriteType)writeType {
   if ((self.writeCharacteristic.properties & CBCharacteristicPropertyWrite) != 0) {
-      type = CBCharacteristicWriteWithResponse;
-  } else if ((self.writeCharacteristic.properties & CBCharacteristicPropertyWriteWithoutResponse) != 0) {
-      type = CBCharacteristicWriteWithoutResponse;
+    return CBCharacteristicWriteWithResponse;
   }
-  
-  NSUInteger reportedMax = [self.connectedPeripheral maximumWriteValueLengthForType:type];
-  // Cap write size to avoid printer firmware issues with large single BLE writes.
-  // Many cheap BLE thermal printers cannot reliably process payloads > ~180 bytes
-  // in a single write, causing data at the end (e.g. QR codes) to be silently dropped.
+  if ((self.writeCharacteristic.properties & CBCharacteristicPropertyWriteWithoutResponse) != 0) {
+    return CBCharacteristicWriteWithoutResponse;
+  }
+  return CBCharacteristicWriteWithResponse;
+}
+
+// Cap write size to avoid printer firmware issues with large single BLE writes.
+// Many cheap BLE thermal printers cannot reliably process payloads > ~180 bytes
+// in a single write, causing data at the end (e.g. QR codes) to be silently dropped.
+- (NSUInteger)maxWriteLength {
+  NSUInteger reportedMax = [self.connectedPeripheral maximumWriteValueLengthForType:[self writeType]];
   NSUInteger maxLen = MIN(reportedMax, 150);
   if (maxLen < 20) maxLen = 20;
+  return maxLen;
+}
+
+- (void)sendRaw:(NSString *)data resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject {
+  if (![self beginSendWithResolve:resolve reject:reject]) return;
   
-  [self.writeQueue removeAllObjects];
+  NSUInteger maxLen = [self maxWriteLength];
   
   // Split on line boundaries to ensure each BLE write contains only complete TSPL commands.
   NSArray<NSString *> *lines = [data componentsSeparatedByString:@"\n"];
@@ -155,6 +167,31 @@ RCT_EXPORT_MODULE()
   [self sendNextChunk];
 }
 
+- (void)sendBytes:(NSString *)data resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject {
+  if (![self beginSendWithResolve:resolve reject:reject]) return;
+  
+  NSData *bytes = [[NSData alloc] initWithBase64EncodedString:data options:NSDataBase64DecodingIgnoreUnknownCharacters];
+  if (!bytes) {
+    self.isWriting = NO;
+    self.sendResolve = nil;
+    self.sendReject = nil;
+    reject(@"INVALID_DATA", @"Data is not valid base64", nil);
+    return;
+  }
+  
+  // Binary payloads (bitmaps, raster graphics) have no line structure,
+  // so they are split into fixed-size chunks and streamed in order.
+  NSUInteger maxLen = [self maxWriteLength];
+  NSUInteger offset = 0;
+  while (offset < bytes.length) {
+    NSUInteger len = MIN(maxLen, bytes.length - offset);
+    [self.writeQueue addObject:[bytes subdataWithRange:NSMakeRange(offset, len)]];
+    offset += len;
+  }
+  
+  [self sendNextChunk];
+}
+
 - (void)sendNextChunk {
   if (self.writeQueue.count == 0) {
     self.isWriting = NO;
@@ -170,14 +207,7 @@ RCT_EXPORT_MODULE()
   NSData *chunk = self.writeQueue.firstObject;
   [self.writeQueue removeObjectAtIndex:0];
   
-  CBCharacteristicWriteType type = CBCharacteristicWriteWithResponse;
-  if ((self.writeCharacteristic.properties & CBCharacteristicPropertyWrite) != 0) {
-      type = CBCharacteristicWriteWithResponse;
-  } else if ((self.writeCharacteristic.properties & CBCharacteristicPropertyWriteWithoutResponse) != 0) {
-      type = CBCharacteristicWriteWithoutResponse;
-  }
-  
-
+  CBCharacteristicWriteType type = [self writeType];
   [self.connectedPeripheral writeValue:chunk forCharacteristic:self.writeCharacteristic type:type];
   
   if (type == CBCharacteristicWriteWithoutResponse) {

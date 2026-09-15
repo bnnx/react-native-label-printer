@@ -1,5 +1,6 @@
 import { NativeEventEmitter } from 'react-native';
 import LabelPrinter from './NativeLabelPrinter';
+import { encodeBase64 } from './bytes';
 
 const eventEmitter = new NativeEventEmitter(LabelPrinter as any);
 
@@ -37,9 +38,19 @@ export function sendRaw(data: string) {
   return LabelPrinter.sendRaw(data);
 }
 
+/**
+ * Send binary data (e.g. the output of `TSPLBuilder.buildBytes()` or
+ * `ESCPOSBuilder.build()`) to the connected printer.
+ */
+export function sendBytes(bytes: Uint8Array) {
+  return LabelPrinter.sendBytes(encodeBase64(bytes));
+}
+
 export function isBluetoothEnabled(): Promise<boolean> {
   return LabelPrinter.isBluetoothEnabled();
 }
 
 export * from './TSPLBuilder';
+export * from './ESCPOSBuilder';
+export * from './bitmap';
 export * from './hooks';
