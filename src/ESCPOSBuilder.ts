@@ -51,6 +51,45 @@ export class ESCPOSBuilder {
   }
 
   /**
+   * Set the print head heating parameters (ESC 7 n1 n2 n3), supported by most
+   * generic 58mm thermal printers. Lower heating time prints lighter, which
+   * reduces dot gain (ink bleeding into neighbouring dots).
+   *
+   * @param maxDots Max simultaneously heated dots, 0-255: (n+1)*8 dots. Default 7.
+   * @param heatingTime Heating time, 3-255 (x10us). Default 80.
+   * @param heatingInterval Heating interval, 0-255 (x10us). Default 2.
+   */
+  heat(
+    maxDots: number = 7,
+    heatingTime: number = 80,
+    heatingInterval: number = 2
+  ): ESCPOSBuilder {
+    this.chunks.push(
+      Uint8Array.of(
+        ESC,
+        0x37,
+        maxDots & 0xff,
+        heatingTime & 0xff,
+        heatingInterval & 0xff
+      )
+    );
+    return this;
+  }
+
+  /**
+   * Set print density and break time (DC2 # n), supported by most generic
+   * 58mm thermal printers.
+   *
+   * @param density 0-31, darkness of the print. Default 10 on most firmwares.
+   * @param breakTime 0-7, pause between heating cycles (x250us). Default 2.
+   */
+  density(density: number, breakTime: number = 2): ESCPOSBuilder {
+    const n = ((breakTime & 0x07) << 5) | (density & 0x1f);
+    this.chunks.push(Uint8Array.of(0x12, 0x23, n));
+    return this;
+  }
+
+  /**
    * Print a monochrome bitmap as raster graphics (GS v 0).
    * The bitmap is packed 1 bit per pixel, 1 = black, MSB first.
    */
