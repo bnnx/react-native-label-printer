@@ -139,7 +139,8 @@ RCT_EXPORT_MODULE()
   
   NSUInteger maxLen = [self maxWriteLength];
   
-  // Split on line boundaries to ensure each BLE write contains only complete TSPL commands.
+  // Split on line boundaries so each BLE write holds whole TSPL commands. This is the
+  // behaviour text labels have always used; sendBytes: splits by size instead.
   NSArray<NSString *> *lines = [data componentsSeparatedByString:@"\n"];
   NSMutableData *currentChunk = [NSMutableData new];
   
@@ -172,10 +173,7 @@ RCT_EXPORT_MODULE()
   
   NSData *bytes = [[NSData alloc] initWithBase64EncodedString:data options:NSDataBase64DecodingIgnoreUnknownCharacters];
   if (!bytes) {
-    self.isWriting = NO;
-    self.sendResolve = nil;
-    self.sendReject = nil;
-    reject(@"INVALID_DATA", @"Data is not valid base64", nil);
+    [self finishSendWithError:@"INVALID_DATA" message:@"Data is not valid base64"];
     return;
   }
   
@@ -192,22 +190,41 @@ RCT_EXPORT_MODULE()
   [self sendNextChunk];
 }
 
+// Ends the current send: clears the queue and settles the pending promise.
+// Pass a nil code to resolve, or a code and message to reject.
+- (void)finishSendWithError:(NSString *)code message:(NSString *)message {
+  self.isWriting = NO;
+  [self.writeQueue removeAllObjects];
+  
+  RCTPromiseResolveBlock resolve = self.sendResolve;
+  RCTPromiseRejectBlock reject = self.sendReject;
+  self.sendResolve = nil;
+  self.sendReject = nil;
+  
+  if (code) {
+    if (reject) reject(code, message, nil);
+  } else {
+    if (resolve) resolve(@(YES));
+  }
+}
+
 - (void)sendNextChunk {
   if (self.writeQueue.count == 0) {
-    self.isWriting = NO;
-
-    if (self.sendResolve) {
-      self.sendResolve(@(YES));
-      self.sendResolve = nil;
-      self.sendReject = nil;
-    }
+    [self finishSendWithError:nil message:nil];
+    return;
+  }
+  
+  CBCharacteristicWriteType type = [self writeType];
+  
+  // CoreBluetooth silently drops writes without response when its internal buffer
+  // is full. Wait for peripheralIsReadyToSendWriteWithoutResponse: to resume.
+  if (type == CBCharacteristicWriteWithoutResponse && !self.connectedPeripheral.canSendWriteWithoutResponse) {
     return;
   }
   
   NSData *chunk = self.writeQueue.firstObject;
   [self.writeQueue removeObjectAtIndex:0];
   
-  CBCharacteristicWriteType type = [self writeType];
   [self.connectedPeripheral writeValue:chunk forCharacteristic:self.writeCharacteristic type:type];
   
   if (type == CBCharacteristicWriteWithoutResponse) {
@@ -227,8 +244,6 @@ RCT_EXPORT_MODULE()
   }
   self.connectedPeripheral = nil;
   self.writeCharacteristic = nil;
-  self.isWriting = NO;
-  [self.writeQueue removeAllObjects];
   
   if (self.connectReject) {
     self.connectReject(@"DISCONNECTED", @"Disconnected", nil);
@@ -236,11 +251,7 @@ RCT_EXPORT_MODULE()
     self.connectResolve = nil;
   }
   
-  if (self.sendReject) {
-    self.sendReject(@"DISCONNECTED", @"Disconnected during send", nil);
-    self.sendReject = nil;
-    self.sendResolve = nil;
-  }
+  [self finishSendWithError:@"DISCONNECTED" message:@"Disconnected during send"];
   
   if (address) {
     [self sendEventWithName:@"onPrinterDisconnected" body:address];
@@ -351,22 +362,18 @@ RCT_EXPORT_MODULE()
 }
 - (void)peripheral:(CBPeripheral *)peripheral didWriteValueForCharacteristic:(CBCharacteristic *)characteristic error:(NSError *)error {
   if (error) {
-
-    self.isWriting = NO;
-    [self.writeQueue removeAllObjects];
-    if (self.sendReject) {
-      self.sendReject(@"WRITE_ERROR", error.localizedDescription, nil);
-      self.sendReject = nil;
-      self.sendResolve = nil;
-    }
+    [self finishSendWithError:@"WRITE_ERROR" message:error.localizedDescription];
     return;
   }
   
-
   [self sendNextChunk];
 }
 
-- (void)peripheralIsReadyToSendWriteWithoutResponse:(CBPeripheral *)peripheral {}
+- (void)peripheralIsReadyToSendWriteWithoutResponse:(CBPeripheral *)peripheral {
+  if (self.isWriting) {
+    [self sendNextChunk];
+  }
+}
 
 - (std::shared_ptr<facebook::react::TurboModule>)getTurboModule:
     (const facebook::react::ObjCTurboModule::InitParams &)params {

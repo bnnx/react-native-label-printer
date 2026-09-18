@@ -82,8 +82,18 @@ Make sure your app requests these runtime permissions before scanning. A library
 | `stopScan()` | Stops the current BLE scan. |
 | `connect(address: string): Promise<void>` | Connects to a printer by its address (MAC on Android, UUID on iOS). Handles MTU negotiation and characteristic discovery automatically. Times out after 5 seconds. |
 | `disconnect(): Promise<void>` | Disconnects from the currently connected printer. |
-| `sendRaw(data: string): Promise<void>` | Sends a raw UTF-8 string to the connected printer. Automatically chunks data on line boundaries based on the negotiated MTU. |
-| `sendBytes(bytes: Uint8Array): Promise<void>` | Sends binary data (bitmaps, ESC/POS raster) to the connected printer. Chunks the payload in fixed-size BLE writes. |
+| `sendRaw(data: string): Promise<void>` | Sends a UTF-8 string to the connected printer. Splits the data into BLE writes on line boundaries, so each write holds whole TSPL commands. |
+| `sendBytes(bytes: Uint8Array): Promise<void>` | Sends binary data to the connected printer. Splits the payload into fixed-size BLE writes, regardless of content. |
+
+The two send functions pair with the two builder outputs:
+
+| Builder output | Send with | Chunking |
+| --- | --- | --- |
+| `TSPLBuilder.build()` (string, text-only labels) | `sendRaw()` | line boundaries |
+| `TSPLBuilder.buildBytes()` (labels with a bitmap) | `sendBytes()` | fixed size |
+| `ESCPOSBuilder.buildBytes()` | `sendBytes()` | fixed size |
+
+Binary payloads may be split anywhere, including inside a TSPL command. This has been validated with bitmap labels on TSPL printers and with raster output on ESC/POS printers.
 
 ### Events
 
@@ -238,7 +248,7 @@ const bytes = new ESCPOSBuilder()
   .formFeed()                                   // FF
   .labelFeed()                                  // GS FF (label firmware only)
   .raw(bytes)                                   // Arbitrary bytes
-  .build();                                     // Uint8Array
+  .buildBytes();                                // Uint8Array
 
 await sendBytes(bytes);
 ```

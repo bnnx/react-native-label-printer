@@ -40,7 +40,9 @@ export function sendRaw(data: string) {
 
 /**
  * Send binary data (e.g. the output of `TSPLBuilder.buildBytes()` or
- * `ESCPOSBuilder.build()`) to the connected printer.
+ * `ESCPOSBuilder.buildBytes()`) to the connected printer. The payload is
+ * split into fixed-size BLE writes; use `sendRaw()` for text-only TSPL
+ * labels, which are split on line boundaries instead.
  */
 export function sendBytes(bytes: Uint8Array) {
   return LabelPrinter.sendBytes(encodeBase64(bytes));

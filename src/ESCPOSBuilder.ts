@@ -175,7 +175,7 @@ export class ESCPOSBuilder {
   /**
    * Build the final byte stream. Send it with `sendBytes()`.
    */
-  build(): Uint8Array {
+  buildBytes(): Uint8Array {
     return concatBytes(this.chunks);
   }
 

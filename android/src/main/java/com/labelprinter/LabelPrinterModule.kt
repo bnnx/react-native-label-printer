@@ -177,10 +177,7 @@ class LabelPrinterModule(reactContext: ReactApplicationContext) :
 
     override fun onCharacteristicWrite(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) {
       if (status != BluetoothGatt.GATT_SUCCESS) {
-        isWriting = false
-        writeQueue.clear()
-        sendPromise?.reject("WRITE_FAILED", "Write failed with status $status")
-        sendPromise = null
+        finishSend("WRITE_FAILED", "Write failed with status $status")
         return
       }
 
@@ -275,6 +272,20 @@ class LabelPrinterModule(reactContext: ReactApplicationContext) :
     return true
   }
 
+  // Ends the current send: clears the queue and settles the pending promise.
+  // Pass no error code to resolve, or a code and message to reject.
+  private fun finishSend(errorCode: String? = null, errorMessage: String = "") {
+    isWriting = false
+    writeQueue.clear()
+    val promise = sendPromise ?: return
+    sendPromise = null
+    if (errorCode != null) {
+      promise.reject(errorCode, errorMessage)
+    } else {
+      promise.resolve(true)
+    }
+  }
+
   // Cap write size to 150 bytes to avoid printer firmware issues with large single BLE writes.
   // Many cheap BLE thermal printers cannot reliably process payloads > ~180 bytes.
   private fun chunkSize(): Int {
@@ -287,8 +298,8 @@ class LabelPrinterModule(reactContext: ReactApplicationContext) :
 
     val chunkSize = chunkSize()
 
-    // Split on line boundaries to avoid breaking TSPL commands across BLE writes.
-    // The printer firmware cannot reassemble commands split across separate writes.
+    // Split on line boundaries so each BLE write holds whole TSPL commands. This is the
+    // behaviour text labels have always used; sendBytes splits by size instead.
     var currentChunk = ByteArray(0)
     
     for (line in data.split("\n")) {
@@ -324,9 +335,7 @@ class LabelPrinterModule(reactContext: ReactApplicationContext) :
     val bytes = try {
       Base64.decode(data, Base64.DEFAULT)
     } catch (e: IllegalArgumentException) {
-      isWriting = false
-      sendPromise = null
-      promise.reject("INVALID_DATA", "Data is not valid base64")
+      finishSend("INVALID_DATA", "Data is not valid base64")
       return
     }
 
@@ -347,9 +356,7 @@ class LabelPrinterModule(reactContext: ReactApplicationContext) :
   private fun sendNextChunkInQueue() {
     val chunk = writeQueue.poll()
     if (chunk == null) {
-      isWriting = false
-      sendPromise?.resolve(true)
-      sendPromise = null
+      finishSend()
       return
     }
 
@@ -372,10 +379,7 @@ class LabelPrinterModule(reactContext: ReactApplicationContext) :
     }
 
     if (!success) {
-      isWriting = false
-      writeQueue.clear()
-      sendPromise?.reject("WRITE_FAILED", "Failed to initiate write characteristic")
-      sendPromise = null
+      finishSend("WRITE_FAILED", "Failed to initiate write characteristic")
     }
   }
 
@@ -387,14 +391,11 @@ class LabelPrinterModule(reactContext: ReactApplicationContext) :
     } catch (e: Exception) {}
     bluetoothGatt = null
     writeCharacteristic = null
-    isWriting = false
-    writeQueue.clear()
     currentMtu = 23
     
     connectPromise?.reject("DISCONNECTED", "Disconnected prematurely")
     connectPromise = null
-    sendPromise?.reject("DISCONNECTED", "Disconnected during write")
-    sendPromise = null
+    finishSend("DISCONNECTED", "Disconnected during write")
 
     if (address != null) {
       reactApplicationContext
