@@ -52,5 +52,5 @@ export function isBluetoothEnabled(): Promise<boolean> {
 
 export * from './TSPLBuilder';
 export * from './ESCPOSBuilder';
-export * from './bitmap';
+export { createMonoBitmap, type MonoBitmap } from './bitmap';
 export * from './hooks';

@@ -1,6 +1,7 @@
 /* eslint-disable no-bitwise */
 import { packMonoBitmap, type MonoBitmap } from './bitmap';
 import { concatBytes } from './bytes';
+import { assertIntegerInRange } from './validate';
 
 const ESC = 0x1b;
 const GS = 0x1d;
@@ -11,9 +12,19 @@ export interface ESCPOSRasterOptions {
   /**
    * Rows per `GS v 0` command. Large images are streamed as consecutive
    * bands so cheap printers with small buffers are not overwhelmed.
-   * Default 64.
+   * Must be an integer >= 1. Many firmwares reject bands taller than ~2300
+   * rows, so keep it small. Default 64.
    */
   bandHeight?: number;
+}
+
+export interface ESCPOSHeatOptions {
+  /** Max simultaneously heated dots, 0-255: (n+1)*8 dots. Default 7. */
+  maxDots?: number;
+  /** Heating time, 3-255 (x10us). Lower prints lighter. Default 80. */
+  heatingTime?: number;
+  /** Heating interval, 0-255 (x10us). Default 2. */
+  heatingInterval?: number;
 }
 
 /**
@@ -44,8 +55,10 @@ export class ESCPOSBuilder {
 
   /**
    * Set left margin in dots (GS L nL nH)
+   * @param dots 0-65535
    */
   leftMargin(dots: number): ESCPOSBuilder {
+    assertIntegerInRange('dots', dots, 0, 65535);
     this.chunks.push(Uint8Array.of(GS, 0x4c, dots & 0xff, (dots >> 8) & 0xff));
     return this;
   }
@@ -54,37 +67,34 @@ export class ESCPOSBuilder {
    * Set the print head heating parameters (ESC 7 n1 n2 n3), supported by most
    * generic 58mm thermal printers. Lower heating time prints lighter, which
    * reduces dot gain (ink bleeding into neighbouring dots).
-   *
-   * @param maxDots Max simultaneously heated dots, 0-255: (n+1)*8 dots. Default 7.
-   * @param heatingTime Heating time, 3-255 (x10us). Default 80.
-   * @param heatingInterval Heating interval, 0-255 (x10us). Default 2.
    */
-  heat(
-    maxDots: number = 7,
-    heatingTime: number = 80,
-    heatingInterval: number = 2
-  ): ESCPOSBuilder {
+  heat(options: ESCPOSHeatOptions = {}): ESCPOSBuilder {
+    const maxDots = options.maxDots ?? 7;
+    const heatingTime = options.heatingTime ?? 80;
+    const heatingInterval = options.heatingInterval ?? 2;
+    assertIntegerInRange('maxDots', maxDots, 0, 255);
+    assertIntegerInRange('heatingTime', heatingTime, 3, 255);
+    assertIntegerInRange('heatingInterval', heatingInterval, 0, 255);
     this.chunks.push(
-      Uint8Array.of(
-        ESC,
-        0x37,
-        maxDots & 0xff,
-        heatingTime & 0xff,
-        heatingInterval & 0xff
-      )
+      Uint8Array.of(ESC, 0x37, maxDots, heatingTime, heatingInterval)
     );
     return this;
   }
 
   /**
-   * Set print density and break time (DC2 # n), supported by most generic
-   * 58mm thermal printers.
+   * Set print density and break time (DC2 # n).
    *
-   * @param density 0-31, darkness of the print. Default 10 on most firmwares.
+   * **Experimental**: this command is implemented by some generic 58mm
+   * firmwares but has not been verified on a real printer yet. Prefer
+   * `heat()` to control darkness.
+   *
+   * @param level 0-31, darkness of the print. Default 10 on most firmwares.
    * @param breakTime 0-7, pause between heating cycles (x250us). Default 2.
    */
-  density(density: number, breakTime: number = 2): ESCPOSBuilder {
-    const n = ((breakTime & 0x07) << 5) | (density & 0x1f);
+  density(level: number, breakTime: number = 2): ESCPOSBuilder {
+    assertIntegerInRange('level', level, 0, 31);
+    assertIntegerInRange('breakTime', breakTime, 0, 7);
+    const n = (breakTime << 5) | level;
     this.chunks.push(Uint8Array.of(0x12, 0x23, n));
     return this;
   }
@@ -95,6 +105,7 @@ export class ESCPOSBuilder {
    */
   raster(bitmap: MonoBitmap, options?: ESCPOSRasterOptions): ESCPOSBuilder {
     const bandHeight = options?.bandHeight ?? 64;
+    assertIntegerInRange('bandHeight', bandHeight, 1, 65535);
     const packed = packMonoBitmap(bitmap, 1);
     const { bytesPerRow } = packed;
 
@@ -118,18 +129,20 @@ export class ESCPOSBuilder {
   }
 
   /**
-   * Print and feed n lines (ESC d n)
+   * Print and feed n lines (ESC d n). Values above 255 are split into
+   * consecutive commands.
    */
   feed(lines: number = 1): ESCPOSBuilder {
-    this.chunks.push(Uint8Array.of(ESC, 0x64, clampByte(lines)));
+    this.pushRepeated(0x64, 'lines', lines);
     return this;
   }
 
   /**
-   * Print and feed n dots (ESC J n)
+   * Print and feed n dots (ESC J n). Values above 255 are split into
+   * consecutive commands.
    */
   feedDots(dots: number): ESCPOSBuilder {
-    this.chunks.push(Uint8Array.of(ESC, 0x4a, clampByte(dots)));
+    this.pushRepeated(0x4a, 'dots', dots);
     return this;
   }
 
@@ -165,8 +178,15 @@ export class ESCPOSBuilder {
   build(): Uint8Array {
     return concatBytes(this.chunks);
   }
-}
 
-function clampByte(value: number): number {
-  return Math.max(0, Math.min(255, Math.round(value)));
+  /** Emit `ESC <command> n` as many times as needed to cover `amount`. */
+  private pushRepeated(command: number, name: string, amount: number): void {
+    assertIntegerInRange(name, amount, 0, Number.MAX_SAFE_INTEGER);
+    let remaining = amount;
+    do {
+      const n = Math.min(255, remaining);
+      this.chunks.push(Uint8Array.of(ESC, command, n));
+      remaining -= n;
+    } while (remaining > 0);
+  }
 }

@@ -31,6 +31,11 @@ export function encodeUtf8(text: string): Uint8Array {
       }
     }
 
+    // Lone surrogates cannot be encoded; emit U+FFFD like TextEncoder does.
+    if (code >= 0xd800 && code <= 0xdfff) {
+      code = 0xfffd;
+    }
+
     if (code < 0x80) {
       bytes.push(code);
     } else if (code < 0x800) {

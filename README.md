@@ -198,7 +198,7 @@ const payload = new TSPLBuilder()
   .barcode(x, y, content, type?, height?, options?)  // Draw barcode
   .qrCode(x, y, content, options?)              // Draw QR code
   .box(x, y, xEnd, yEnd, thickness?)            // Draw box
-  .bitmap(x, y, monoBitmap, mode?)              // Draw a MonoBitmap (binary)
+  .bitmap(x, y, monoBitmap, mode?)              // Draw a MonoBitmap (binary); mode: 'overwrite' | 'or' | 'xor'
   .print(copies)                                // Print command
   .build();                                     // Build final string (text-only labels)
 ```
@@ -206,6 +206,8 @@ const payload = new TSPLBuilder()
 Labels that contain a bitmap are binary, so build them with `buildBytes()` and send with `sendBytes()`:
 
 ```typescript
+import { TSPLBuilder, sendBytes } from '@bnnx/react-native-label-printer';
+
 const bytes = new TSPLBuilder()
   .size(50, 30)
   .gap(2)
@@ -222,13 +224,17 @@ await sendBytes(bytes);
 Chainable builder for ESC/POS receipt printers. It is focused on raster printing: render the label as a `MonoBitmap` and send it as `GS v 0` raster graphics.
 
 ```typescript
+import { ESCPOSBuilder, sendBytes } from '@bnnx/react-native-label-printer';
+
 const bytes = new ESCPOSBuilder()
   .initialize()                                 // ESC @
   .align('left' | 'center' | 'right')           // ESC a n
-  .leftMargin(dots)                             // GS L nL nH
-  .raster(monoBitmap, { bandHeight? })          // GS v 0 (streamed in bands)
-  .feed(lines)                                  // ESC d n
-  .feedDots(dots)                               // ESC J n
+  .leftMargin(dots)                             // GS L nL nH (0-65535)
+  .heat({ maxDots?, heatingTime?, heatingInterval? }) // ESC 7 n1 n2 n3
+  .density(level, breakTime?)                   // DC2 # n (experimental, see below)
+  .raster(monoBitmap, { bandHeight? })          // GS v 0 (streamed in bands, default 64 rows)
+  .feed(lines)                                  // ESC d n (split when > 255)
+  .feedDots(dots)                               // ESC J n (split when > 255)
   .formFeed()                                   // FF
   .labelFeed()                                  // GS FF (label firmware only)
   .raw(bytes)                                   // Arbitrary bytes
@@ -237,9 +243,15 @@ const bytes = new ESCPOSBuilder()
 await sendBytes(bytes);
 ```
 
+`heat()` controls darkness on generic 58mm printers: a lower `heatingTime` (3-255, default 80) prints lighter and reduces dot gain. `maxDots` (0-255, default 7) and `heatingInterval` (0-255, default 2) rarely need to change.
+
+`density()` sends `DC2 #`, which some generic firmwares implement but has not been verified on a real printer yet. Treat it as experimental and prefer `heat()`.
+
+Every numeric parameter is validated: out-of-range or non-integer values throw a `RangeError` instead of silently producing a different command.
+
 ## MonoBitmap
 
-Both builders accept a `MonoBitmap`: one byte per pixel, row-major, any non-zero value is black. Create one with `createMonoBitmap(width, height)` and draw into `data` with your own renderer. For 58mm paper at 203 dpi the printable width is 384 dots (48 bytes per row).
+Both builders accept a `MonoBitmap`: one byte per pixel, row-major (`width * height` bytes), any non-zero value is black. Create one with `createMonoBitmap(width, height)` (both must be integers >= 1) and draw into `data` with your own renderer. For 58mm paper at 203 dpi the printable width is 384 dots (48 bytes per row).
 
 ## Contributing
 

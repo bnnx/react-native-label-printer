@@ -1,7 +1,10 @@
 /* eslint-disable no-bitwise */
+import { assertIntegerInRange } from './validate';
+
 /**
  * Monochrome bitmap in printer-friendly form.
- * `data` holds one byte per pixel, row-major, where any non-zero value is black.
+ * `data` holds one byte per pixel, row-major (`width * height` bytes), where
+ * any non-zero value is black.
  */
 export interface MonoBitmap {
   width: number;
@@ -15,7 +18,15 @@ export interface PackedBitmap {
   data: Uint8Array;
 }
 
+/** Widest bitmap whose packed row still fits the 16-bit width fields. */
+const MAX_DIMENSION = 65535 * 8;
+
+/**
+ * Create an all-white MonoBitmap. Draw into `data` with your own renderer.
+ */
 export function createMonoBitmap(width: number, height: number): MonoBitmap {
+  assertIntegerInRange('width', width, 1, MAX_DIMENSION);
+  assertIntegerInRange('height', height, 1, MAX_DIMENSION);
   return { width, height, data: new Uint8Array(width * height) };
 }
 
@@ -30,6 +41,8 @@ export function packMonoBitmap(
   blackBit: 0 | 1
 ): PackedBitmap {
   const { width, height, data } = bitmap;
+  assertIntegerInRange('bitmap.width', width, 1, MAX_DIMENSION);
+  assertIntegerInRange('bitmap.height', height, 1, MAX_DIMENSION);
   if (data.length !== width * height) {
     throw new Error(
       `MonoBitmap data length ${data.length} does not match ${width}x${height}`

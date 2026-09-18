@@ -1,3 +1,6 @@
+import { packMonoBitmap, type MonoBitmap } from './bitmap';
+import { concatBytes, encodeUtf8 } from './bytes';
+
 /**
  * TSPL Text Options
  */
@@ -40,8 +43,10 @@ export interface TSPLQrCodeOptions {
   rotation?: 0 | 90 | 180 | 270;
 }
 
-import { packMonoBitmap, type MonoBitmap } from './bitmap';
-import { concatBytes, encodeUtf8 } from './bytes';
+/**
+ * TSPL Bitmap Mode: overwrite, OR or XOR with the image buffer
+ */
+export type TSPLBitmapMode = 'overwrite' | 'or' | 'xor';
 
 /**
  * TSPL Label Builder
@@ -250,17 +255,18 @@ export class TSPLBuilder {
    * @param x Coordinate x in dots
    * @param y Coordinate y in dots
    * @param bitmap Bitmap to draw (1 byte per pixel, non-zero = black)
-   * @param mode 0 = OVERWRITE, 1 = OR, 2 = XOR (default 0)
+   * @param mode How the bitmap combines with the image buffer (default "overwrite")
    */
   bitmap(
     x: number,
     y: number,
     bitmap: MonoBitmap,
-    mode: 0 | 1 | 2 = 0
+    mode: TSPLBitmapMode = 'overwrite'
   ): TSPLBuilder {
     const packed = packMonoBitmap(bitmap, 0);
+    const modeValue = { overwrite: 0, or: 1, xor: 2 }[mode];
     const header = encodeUtf8(
-      `BITMAP ${x},${y},${packed.bytesPerRow},${packed.height},${mode},`
+      `BITMAP ${x},${y},${packed.bytesPerRow},${packed.height},${modeValue},`
     );
     this.commands.push(concatBytes([header, packed.data]));
     return this;
