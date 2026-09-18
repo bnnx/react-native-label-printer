@@ -96,38 +96,51 @@ RCT_EXPORT_MODULE()
   resolve(@(isEnabled));
 }
 
-- (void)sendRaw:(NSString *)data resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject {
+- (BOOL)beginSendWithResolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject {
   if (!self.connectedPeripheral || !self.writeCharacteristic) {
     reject(@"NOT_CONNECTED", @"Printer is not connected", nil);
-    return;
+    return NO;
   }
   
   if (self.isWriting) {
     reject(@"BUSY", @"Already sending data", nil);
-    return;
+    return NO;
   }
   
   self.isWriting = YES;
   self.sendResolve = resolve;
   self.sendReject = reject;
-  
-  CBCharacteristicWriteType type = CBCharacteristicWriteWithResponse;
+  [self.writeQueue removeAllObjects];
+  return YES;
+}
+
+- (CBCharacteristicWriteType)writeType {
   if ((self.writeCharacteristic.properties & CBCharacteristicPropertyWrite) != 0) {
-      type = CBCharacteristicWriteWithResponse;
-  } else if ((self.writeCharacteristic.properties & CBCharacteristicPropertyWriteWithoutResponse) != 0) {
-      type = CBCharacteristicWriteWithoutResponse;
+    return CBCharacteristicWriteWithResponse;
   }
-  
-  NSUInteger reportedMax = [self.connectedPeripheral maximumWriteValueLengthForType:type];
-  // Cap write size to avoid printer firmware issues with large single BLE writes.
-  // Many cheap BLE thermal printers cannot reliably process payloads > ~180 bytes
-  // in a single write, causing data at the end (e.g. QR codes) to be silently dropped.
+  if ((self.writeCharacteristic.properties & CBCharacteristicPropertyWriteWithoutResponse) != 0) {
+    return CBCharacteristicWriteWithoutResponse;
+  }
+  return CBCharacteristicWriteWithResponse;
+}
+
+// Cap write size to avoid printer firmware issues with large single BLE writes.
+// Many cheap BLE thermal printers cannot reliably process payloads > ~180 bytes
+// in a single write, causing data at the end (e.g. QR codes) to be silently dropped.
+- (NSUInteger)maxWriteLength {
+  NSUInteger reportedMax = [self.connectedPeripheral maximumWriteValueLengthForType:[self writeType]];
   NSUInteger maxLen = MIN(reportedMax, 150);
   if (maxLen < 20) maxLen = 20;
+  return maxLen;
+}
+
+- (void)sendRaw:(NSString *)data resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject {
+  if (![self beginSendWithResolve:resolve reject:reject]) return;
   
-  [self.writeQueue removeAllObjects];
+  NSUInteger maxLen = [self maxWriteLength];
   
-  // Split on line boundaries to ensure each BLE write contains only complete TSPL commands.
+  // Split on line boundaries so each BLE write holds whole TSPL commands. This is the
+  // behaviour text labels have always used; sendBytes: splits by size instead.
   NSArray<NSString *> *lines = [data componentsSeparatedByString:@"\n"];
   NSMutableData *currentChunk = [NSMutableData new];
   
@@ -155,29 +168,63 @@ RCT_EXPORT_MODULE()
   [self sendNextChunk];
 }
 
+- (void)sendBytes:(NSString *)data resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject {
+  if (![self beginSendWithResolve:resolve reject:reject]) return;
+  
+  NSData *bytes = [[NSData alloc] initWithBase64EncodedString:data options:NSDataBase64DecodingIgnoreUnknownCharacters];
+  if (!bytes) {
+    [self finishSendWithError:@"INVALID_DATA" message:@"Data is not valid base64"];
+    return;
+  }
+  
+  // Binary payloads (bitmaps, raster graphics) have no line structure,
+  // so they are split into fixed-size chunks and streamed in order.
+  NSUInteger maxLen = [self maxWriteLength];
+  NSUInteger offset = 0;
+  while (offset < bytes.length) {
+    NSUInteger len = MIN(maxLen, bytes.length - offset);
+    [self.writeQueue addObject:[bytes subdataWithRange:NSMakeRange(offset, len)]];
+    offset += len;
+  }
+  
+  [self sendNextChunk];
+}
+
+// Ends the current send: clears the queue and settles the pending promise.
+// Pass a nil code to resolve, or a code and message to reject.
+- (void)finishSendWithError:(NSString *)code message:(NSString *)message {
+  self.isWriting = NO;
+  [self.writeQueue removeAllObjects];
+  
+  RCTPromiseResolveBlock resolve = self.sendResolve;
+  RCTPromiseRejectBlock reject = self.sendReject;
+  self.sendResolve = nil;
+  self.sendReject = nil;
+  
+  if (code) {
+    if (reject) reject(code, message, nil);
+  } else {
+    if (resolve) resolve(@(YES));
+  }
+}
+
 - (void)sendNextChunk {
   if (self.writeQueue.count == 0) {
-    self.isWriting = NO;
-
-    if (self.sendResolve) {
-      self.sendResolve(@(YES));
-      self.sendResolve = nil;
-      self.sendReject = nil;
-    }
+    [self finishSendWithError:nil message:nil];
+    return;
+  }
+  
+  CBCharacteristicWriteType type = [self writeType];
+  
+  // CoreBluetooth silently drops writes without response when its internal buffer
+  // is full. Wait for peripheralIsReadyToSendWriteWithoutResponse: to resume.
+  if (type == CBCharacteristicWriteWithoutResponse && !self.connectedPeripheral.canSendWriteWithoutResponse) {
     return;
   }
   
   NSData *chunk = self.writeQueue.firstObject;
   [self.writeQueue removeObjectAtIndex:0];
   
-  CBCharacteristicWriteType type = CBCharacteristicWriteWithResponse;
-  if ((self.writeCharacteristic.properties & CBCharacteristicPropertyWrite) != 0) {
-      type = CBCharacteristicWriteWithResponse;
-  } else if ((self.writeCharacteristic.properties & CBCharacteristicPropertyWriteWithoutResponse) != 0) {
-      type = CBCharacteristicWriteWithoutResponse;
-  }
-  
-
   [self.connectedPeripheral writeValue:chunk forCharacteristic:self.writeCharacteristic type:type];
   
   if (type == CBCharacteristicWriteWithoutResponse) {
@@ -197,8 +244,6 @@ RCT_EXPORT_MODULE()
   }
   self.connectedPeripheral = nil;
   self.writeCharacteristic = nil;
-  self.isWriting = NO;
-  [self.writeQueue removeAllObjects];
   
   if (self.connectReject) {
     self.connectReject(@"DISCONNECTED", @"Disconnected", nil);
@@ -206,11 +251,7 @@ RCT_EXPORT_MODULE()
     self.connectResolve = nil;
   }
   
-  if (self.sendReject) {
-    self.sendReject(@"DISCONNECTED", @"Disconnected during send", nil);
-    self.sendReject = nil;
-    self.sendResolve = nil;
-  }
+  [self finishSendWithError:@"DISCONNECTED" message:@"Disconnected during send"];
   
   if (address) {
     [self sendEventWithName:@"onPrinterDisconnected" body:address];
@@ -321,22 +362,18 @@ RCT_EXPORT_MODULE()
 }
 - (void)peripheral:(CBPeripheral *)peripheral didWriteValueForCharacteristic:(CBCharacteristic *)characteristic error:(NSError *)error {
   if (error) {
-
-    self.isWriting = NO;
-    [self.writeQueue removeAllObjects];
-    if (self.sendReject) {
-      self.sendReject(@"WRITE_ERROR", error.localizedDescription, nil);
-      self.sendReject = nil;
-      self.sendResolve = nil;
-    }
+    [self finishSendWithError:@"WRITE_ERROR" message:error.localizedDescription];
     return;
   }
   
-
   [self sendNextChunk];
 }
 
-- (void)peripheralIsReadyToSendWriteWithoutResponse:(CBPeripheral *)peripheral {}
+- (void)peripheralIsReadyToSendWriteWithoutResponse:(CBPeripheral *)peripheral {
+  if (self.isWriting) {
+    [self sendNextChunk];
+  }
+}
 
 - (std::shared_ptr<facebook::react::TurboModule>)getTurboModule:
     (const facebook::react::ObjCTurboModule::InitParams &)params {

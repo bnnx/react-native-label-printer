@@ -1,5 +1,6 @@
 import { NativeEventEmitter } from 'react-native';
 import LabelPrinter from './NativeLabelPrinter';
+import { encodeBase64 } from './bytes';
 
 const eventEmitter = new NativeEventEmitter(LabelPrinter as any);
 
@@ -37,9 +38,21 @@ export function sendRaw(data: string) {
   return LabelPrinter.sendRaw(data);
 }
 
+/**
+ * Send binary data (e.g. the output of `TSPLBuilder.buildBytes()` or
+ * `ESCPOSBuilder.buildBytes()`) to the connected printer. The payload is
+ * split into fixed-size BLE writes; use `sendRaw()` for text-only TSPL
+ * labels, which are split on line boundaries instead.
+ */
+export function sendBytes(bytes: Uint8Array) {
+  return LabelPrinter.sendBytes(encodeBase64(bytes));
+}
+
 export function isBluetoothEnabled(): Promise<boolean> {
   return LabelPrinter.isBluetoothEnabled();
 }
 
 export * from './TSPLBuilder';
+export * from './ESCPOSBuilder';
+export { createMonoBitmap, type MonoBitmap } from './bitmap';
 export * from './hooks';

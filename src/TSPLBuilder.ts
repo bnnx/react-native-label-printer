@@ -1,3 +1,6 @@
+import { packMonoBitmap, type MonoBitmap } from './bitmap';
+import { concatBytes, encodeUtf8 } from './bytes';
+
 /**
  * TSPL Text Options
  */
@@ -41,12 +44,17 @@ export interface TSPLQrCodeOptions {
 }
 
 /**
+ * TSPL Bitmap Mode: overwrite, OR or XOR with the image buffer
+ */
+export type TSPLBitmapMode = 'overwrite' | 'or' | 'xor';
+
+/**
  * TSPL Label Builder
  * Helper class to construct TSPL command strings for thermal printers.
  * Follows the Builder pattern for fluent chaining.
  */
 export class TSPLBuilder {
-  private commands: string[] = [];
+  private commands: (string | Uint8Array)[] = [];
 
   /**
    * Set the label size
@@ -242,6 +250,29 @@ export class TSPLBuilder {
   }
 
   /**
+   * Draw a monochrome bitmap (BITMAP command).
+   * Binary payload: build with `buildBytes()` and send with `sendBytes()`.
+   * @param x Coordinate x in dots
+   * @param y Coordinate y in dots
+   * @param bitmap Bitmap to draw (1 byte per pixel, non-zero = black)
+   * @param mode How the bitmap combines with the image buffer (default "overwrite")
+   */
+  bitmap(
+    x: number,
+    y: number,
+    bitmap: MonoBitmap,
+    mode: TSPLBitmapMode = 'overwrite'
+  ): TSPLBuilder {
+    const packed = packMonoBitmap(bitmap, 0);
+    const modeValue = { overwrite: 0, or: 1, xor: 2 }[mode];
+    const header = encodeUtf8(
+      `BITMAP ${x},${y},${packed.bytesPerRow},${packed.height},${modeValue},`
+    );
+    this.commands.push(concatBytes([header, packed.data]));
+    return this;
+  }
+
+  /**
    * Print the label
    * @param copies Number of copies
    */
@@ -251,9 +282,29 @@ export class TSPLBuilder {
   }
 
   /**
-   * Build the final raw string commands
+   * Build the final raw string commands (text-only labels, for `sendRaw()`)
    */
   build(): string {
+    if (this.commands.some((command) => typeof command !== 'string')) {
+      throw new Error(
+        'TSPLBuilder: label contains binary commands (bitmap); use buildBytes() and sendBytes()'
+      );
+    }
     return this.commands.join('\n') + '\n';
+  }
+
+  /**
+   * Build the final byte stream (supports bitmaps, for `sendBytes()`)
+   */
+  buildBytes(): Uint8Array {
+    const newline = Uint8Array.of(0x0a);
+    const chunks: Uint8Array[] = [];
+    for (const command of this.commands) {
+      chunks.push(
+        typeof command === 'string' ? encodeUtf8(command) : command,
+        newline
+      );
+    }
+    return concatBytes(chunks);
   }
 }
